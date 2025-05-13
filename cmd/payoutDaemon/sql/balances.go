@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	core "github.com/Snipa22/core-go-lib/milieu"
+	"github.com/jackc/pgx/v4"
 	"time"
 )
 
@@ -65,4 +66,9 @@ func GetBalanceIDByAddress(milieu *core.Milieu, address string) (uint64, error) 
 		return 0, err
 	}
 	return id, nil
+}
+
+func DecreaseBalance(txn pgx.Tx, balanceID uint64, amount uint64) error {
+	_, err := txn.Exec(context.Background(), "update balances set balance = balance - $1 where id = $2", amount, balanceID)
+	return err
 }
