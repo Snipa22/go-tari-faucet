@@ -22,3 +22,9 @@ func CreateNewBatch(milieu *core.Milieu, txCount int, amount uint64) (int, error
 	}
 	return id, nil
 }
+
+// UpdateBatchAmounts sets the amounts success/failed
+func UpdateBatchAmounts(milieu *core.Milieu, batchID int, successAmount uint64, failedAmount uint64) error {
+	_, err := milieu.GetRawPGXPool().Exec(context.Background(), "update payment_batch set amount_success = $1, amount_fail = $2 where id = $3", successAmount, failedAmount, batchID)
+	return err
+}

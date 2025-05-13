@@ -4,11 +4,10 @@ go 1.24.0
 
 require (
 	github.com/Snipa22/core-go-lib v1.1.2
-	github.com/Snipa22/go-tari-grpc-lib v0.0.4
+	github.com/Snipa22/go-tari-grpc-lib v0.0.5
 	github.com/jackc/pgx/v4 v4.18.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.3
-	google.golang.org/grpc v1.72.0
 )
 
 require (
