@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"errors"
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"time"
 )
@@ -51,4 +52,17 @@ func GetAllBalances(milieu *core.Milieu) ([]BalanceSqlRow, error) {
 		})
 	}
 	return result, nil
+}
+
+func GetBalanceIDByAddress(milieu *core.Milieu, address string) (uint64, error) {
+	row := milieu.GetRawPGXPool().QueryRow(context.Background(), "select id from balances where address = $1", address)
+	if row == nil {
+		return 0, errors.New("balance not found")
+	}
+	var id uint64
+	err := row.Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }
