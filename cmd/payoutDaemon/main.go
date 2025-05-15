@@ -88,7 +88,7 @@ func performPayouts(milieu *core.Milieu) {
 		balanceCache[sqlBalance.Address] = sqlBalance.Balance
 	}
 	if len(payments) == 0 {
-		milieu.Debug(fmt.Sprintf("No payments found, exiting run"))
+		milieu.Info(fmt.Sprintf("No payments found, exiting run"))
 		return
 	}
 	milieu.Info(fmt.Sprintf("%v/%v payments prepared for %v, inserting batch data", len(payments), len(balances), totalAmount))
@@ -176,7 +176,7 @@ func main() {
 	}
 
 	// Load config flags
-	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "100.96.247.35:18143", "Tari wallet GRPC address")
+	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "127.0.0.1:18143", "Tari wallet GRPC address")
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
 
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
@@ -185,7 +185,7 @@ func main() {
 	}
 
 	// Everything is setup, lets get to work.
-	payoutOnBootPtr := flag.Bool("payout-on-boot", true, "Perform payout on boot")
+	payoutOnBootPtr := flag.Bool("payout-on-boot", false, "Perform payout on boot")
 
 	if *payoutOnBootPtr {
 		performPayouts(milieu)
