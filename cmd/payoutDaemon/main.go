@@ -6,10 +6,11 @@ import (
 	"fmt"
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-faucet/cmd/payoutDaemon/sql"
-	"github.com/Snipa22/go-tari-grpc-lib/tari_generated"
-	"github.com/Snipa22/go-tari-grpc-lib/walletGRPC"
+	"github.com/Snipa22/go-tari-grpc-lib/v2/tari_generated"
+	"github.com/Snipa22/go-tari-grpc-lib/v2/walletGRPC"
 	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
+	"math/rand"
 	"os"
 )
 
@@ -125,12 +126,22 @@ func performPayouts(milieu *core.Milieu) {
 			milieu.Info(err.Error())
 			continue
 		}
+		if v.TransactionId == 0 {
+			// 0 TXN ID's are a problem.  Replace them with something more valid-esque, we shouldn't have any collisions
+			// given how big the uint64 size is.
+			v.TransactionId = rand.Uint64()
+		}
 		txn.Begin(context.Background())
 		defer milieu.CleanupTxn()
 		err = sql.CreateNewTransaction(txn, v.TransactionId, v.IsSuccess, v.FailureMessage, addressCache[v.Address], batchID, balanceCache[v.Address])
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
+			milieu.CleanupTxn()
+			continue
+		}
+		if !v.IsSuccess {
+			txn.Commit(context.Background())
 			milieu.CleanupTxn()
 			continue
 		}
@@ -165,7 +176,7 @@ func main() {
 	}
 
 	// Load config flags
-	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "127.0.0.1:18143", "Tari wallet GRPC address")
+	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "100.96.247.35:18143", "Tari wallet GRPC address")
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
 
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
@@ -174,7 +185,7 @@ func main() {
 	}
 
 	// Everything is setup, lets get to work.
-	payoutOnBootPtr := flag.Bool("payout-on-boot", false, "Perform payout on boot")
+	payoutOnBootPtr := flag.Bool("payout-on-boot", true, "Perform payout on boot")
 
 	if *payoutOnBootPtr {
 		performPayouts(milieu)
