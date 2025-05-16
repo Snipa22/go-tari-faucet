@@ -165,10 +165,10 @@ func performPayouts(milieu *core.Milieu) {
 	milieu.Info("Done processing transaction results, updating batch data")
 	err = sql.UpdateBatchAmounts(milieu, batchID, successAmount, failedAmount)
 	if err != nil {
-		milieu.Info("Done updating batch data, run complete")
-	} else {
 		milieu.CaptureException(err)
 		milieu.Info(err.Error())
+	} else {
+		milieu.Info("Done updating batch data, run complete")
 	}
 }
 
