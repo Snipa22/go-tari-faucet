@@ -65,6 +65,11 @@ func performPayouts(milieu *core.Milieu) {
 	var totalAmount uint64 = 0
 	for _, sqlBalance := range balances {
 		milieu.Debug(fmt.Sprintf("Starting payout check for %v", sqlBalance.ID))
+		if !sqlBalance.Valid {
+			// Balance is tagged as invalid, do not process
+			milieu.Debug(fmt.Sprintf("%v is set to invalid", sqlBalance.ID))
+			continue
+		}
 		if sqlBalance.Balance < sqlBalance.PayoutMinimum {
 			// Check to see if there's a bypass in redis
 			client := milieu.GetRedis()
@@ -177,22 +182,23 @@ func main() {
 
 	// Load config flags
 	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "127.0.0.1:18143", "Tari wallet GRPC address")
+	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
+	payoutOnBootPtr := flag.Bool("payout-on-boot", false, "Perform payout on boot")
+	cronTimePtr := flag.String("cron-time", "0 * * * *", "Cron time for payouts, runs every hour")
+	flag.Parse()
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
 
-	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
 	if *debugEnabledPtr {
 		milieu.SetLogLevel(logrus.DebugLevel)
 	}
 
 	// Everything is setup, lets get to work.
-	payoutOnBootPtr := flag.Bool("payout-on-boot", false, "Perform payout on boot")
 
 	if *payoutOnBootPtr {
 		performPayouts(milieu)
 	}
 
 	// Cron time!
-	cronTimePtr := flag.String("cron-time", "0 * * * *", "Cron time for payouts, runs every hour")
 
 	// Build the cron spinner
 	c := cron.New()
