@@ -220,6 +220,7 @@ func main() {
 		performPayouts(milieu)
 		if *runOncePtr {
 			milieu.Info("Dry-run mode is enabled, exiting")
+			os.Exit(0)
 		}
 	}
 
