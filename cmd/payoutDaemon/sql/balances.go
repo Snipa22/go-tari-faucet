@@ -23,7 +23,7 @@ type BalanceSqlRow struct {
 }
 
 func GetAllBalances(milieu *core.Milieu) ([]BalanceSqlRow, error) {
-	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id, date_added, date_balance_increased, date_last_updated, balance, valid, address, payout_minimum from balances")
+	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id, date_added, date_balance_increased, date_last_updated, balance, valid, address, payout_minimum from balances order by id desc")
 	if err != nil {
 		return nil, err
 	}

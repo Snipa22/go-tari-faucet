@@ -33,6 +33,8 @@ payoutDaemon is /not/ designed to perform any additional GRPC calls/etc, it is /
 	transactions.  Check grpcWalletData for a more generic set of interfaces
 */
 
+var isDryRun bool
+
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
@@ -96,6 +98,15 @@ func performPayouts(milieu *core.Milieu) {
 		milieu.Info(fmt.Sprintf("No payments found, exiting run"))
 		return
 	}
+
+	if isDryRun {
+		milieu.Info("In dry run mode, not inserting batch or executing wallet, dumping txn list for debugging")
+		for i, v := range payments {
+			milieu.Info(fmt.Sprintf("Index: %v, data: %v", i, v))
+		}
+		return
+	}
+
 	milieu.Info(fmt.Sprintf("%v/%v payments prepared for %v, inserting batch data", len(payments), len(balances), totalAmount))
 
 	batchID, err := sql.CreateNewBatch(milieu, len(payments), totalAmount)
@@ -111,6 +122,10 @@ func performPayouts(milieu *core.Milieu) {
 	if err != nil {
 		milieu.CaptureException(err)
 		milieu.Info(err.Error())
+		milieu.Debug("Dumping all data in the transaction struct for debugging")
+		for i, v := range payments {
+			milieu.Debug(fmt.Sprintf("Index: %v, data: %v", i, v))
+		}
 		return
 	}
 	var successAmount uint64 = 0
@@ -189,6 +204,8 @@ func main() {
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
 	payoutOnBootPtr := flag.Bool("payout-on-boot", false, "Perform payout on boot")
 	cronTimePtr := flag.String("cron-time", "0 * * * *", "Cron time for payouts, runs every hour")
+	runOncePtr := flag.Bool("run-once", false, "Run once and exit")
+	dryRunPtr := flag.Bool("dry-run", false, "Puts the system into dry-run mode, exits right before batch insert")
 	flag.Parse()
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
 
@@ -196,10 +213,14 @@ func main() {
 		milieu.SetLogLevel(logrus.DebugLevel)
 	}
 
-	// Everything is setup, lets get to work.
+	isDryRun = *dryRunPtr
 
-	if *payoutOnBootPtr {
+	// Everything is setup, lets get to work.
+	if *payoutOnBootPtr || *runOncePtr {
 		performPayouts(milieu)
+		if *runOncePtr {
+			milieu.Info("Dry-run mode is enabled, exiting")
+		}
 	}
 
 	// Cron time!
