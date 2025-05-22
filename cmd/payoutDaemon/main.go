@@ -34,6 +34,7 @@ payoutDaemon is /not/ designed to perform any additional GRPC calls/etc, it is /
 */
 
 var isDryRun bool
+var txnMsg string
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -89,7 +90,7 @@ func performPayouts(milieu *core.Milieu) {
 			Amount:      sqlBalance.Balance,
 			FeePerGram:  5,
 			PaymentType: 2,
-			PaymentId:   nil,
+			PaymentId:   []byte(txnMsg),
 		})
 		addressCache[sqlBalance.Address] = sqlBalance.ID
 		balanceCache[sqlBalance.Address] = sqlBalance.Balance
@@ -206,7 +207,10 @@ func main() {
 	cronTimePtr := flag.String("cron-time", "0 * * * *", "Cron time for payouts, runs every hour")
 	runOncePtr := flag.Bool("run-once", false, "Run once and exit")
 	dryRunPtr := flag.Bool("dry-run", false, "Puts the system into dry-run mode, exits right before batch insert")
+	txnMsgPtr := flag.String("txn-msg", "Sent via go-tari-faucet by Impala/Snipa22/Jagtech", "Transaction message to attach to a send, max length 256 characters")
+
 	flag.Parse()
+	txnMsg = *txnMsgPtr
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
 
 	if *debugEnabledPtr {
