@@ -85,13 +85,17 @@ func performPayouts(milieu *core.Milieu) {
 		}
 		milieu.Debug(fmt.Sprintf("Adding %v to payment ready for %v", sqlBalance.ID, sqlBalance.Balance))
 		totalAmount += sqlBalance.Balance
-		payments = append(payments, &tari_generated.PaymentRecipient{
+		paymentRecipient := &tari_generated.PaymentRecipient{
 			Address:     sqlBalance.Address,
 			Amount:      sqlBalance.Balance,
 			FeePerGram:  5,
 			PaymentType: 2,
-			PaymentId:   []byte(txnMsg),
-		})
+			PaymentId:   nil,
+		}
+		if len(txnMsg) > 0 {
+			paymentRecipient.PaymentId = []byte(txnMsg)
+		}
+		payments = append(payments)
 		addressCache[sqlBalance.Address] = sqlBalance.ID
 		balanceCache[sqlBalance.Address] = sqlBalance.Balance
 	}
@@ -207,7 +211,7 @@ func main() {
 	cronTimePtr := flag.String("cron-time", "0 * * * *", "Cron time for payouts, runs every hour")
 	runOncePtr := flag.Bool("run-once", false, "Run once and exit")
 	dryRunPtr := flag.Bool("dry-run", false, "Puts the system into dry-run mode, exits right before batch insert")
-	txnMsgPtr := flag.String("txn-msg", "Sent via go-tari-faucet by Impala/Snipa22/Jagtech", "Transaction message to attach to a send, max length 256 characters")
+	txnMsgPtr := flag.String("txn-msg", "", "Transaction message to attach to a send, max length 256 characters")
 
 	flag.Parse()
 	txnMsg = *txnMsgPtr
