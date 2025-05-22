@@ -95,7 +95,7 @@ func performPayouts(milieu *core.Milieu) {
 		if len(txnMsg) > 0 {
 			paymentRecipient.PaymentId = []byte(txnMsg)
 		}
-		payments = append(payments)
+		payments = append(payments, paymentRecipient)
 		addressCache[sqlBalance.Address] = sqlBalance.ID
 		balanceCache[sqlBalance.Address] = sqlBalance.Balance
 	}
