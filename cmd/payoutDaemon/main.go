@@ -86,14 +86,16 @@ func performPayouts(milieu *core.Milieu) {
 		milieu.Debug(fmt.Sprintf("Adding %v to payment ready for %v", sqlBalance.ID, sqlBalance.Balance))
 		totalAmount += sqlBalance.Balance
 		paymentRecipient := &tari_generated.PaymentRecipient{
-			Address:     sqlBalance.Address,
-			Amount:      sqlBalance.Balance,
-			FeePerGram:  5,
-			PaymentType: 2,
-			PaymentId:   nil,
+			Address:       sqlBalance.Address,
+			Amount:        sqlBalance.Balance,
+			FeePerGram:    5,
+			PaymentType:   2,
+			UserPaymentId: nil,
 		}
 		if len(txnMsg) > 0 {
-			paymentRecipient.PaymentId = []byte(txnMsg)
+			paymentRecipient.UserPaymentId = &tari_generated.UserPaymentId{
+				Utf8String: txnMsg,
+			}
 		}
 		payments = append(payments, paymentRecipient)
 		addressCache[sqlBalance.Address] = sqlBalance.ID
