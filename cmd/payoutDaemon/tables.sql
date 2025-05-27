@@ -50,3 +50,28 @@ create index transactions_batch_id_index
     on transactions (batch_id);
 create index transactions_balance_id_index
     on transactions (balance_id);
+
+create table public.transaction_details
+(
+    id              numeric                  not null
+        constraint transaction_details_pk
+            primary key,
+    status          integer default 0        not null,
+    amount          numeric default 0        not null,
+    fee             integer default 0        not null,
+    is_cancelled    boolean default false    not null,
+    excess_sig      bytea                    not null,
+    timestamp       timestamp with time zone not null,
+    raw_payment_id  bytea                    not null,
+    mined_at_height numeric                  not null,
+    user_payment_id bytea                    not null,
+    dest_address    bytea                    not null,
+    rechecked       boolean default false,
+    repaid          boolean
+);
+
+alter table public.transaction_details
+    owner to postgres;
+
+create index transaction_details_dest_address_index
+    on public.transaction_details (dest_address);

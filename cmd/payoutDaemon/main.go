@@ -189,9 +189,26 @@ func performPayouts(milieu *core.Milieu) {
 	if err != nil {
 		milieu.CaptureException(err)
 		milieu.Info(err.Error())
-	} else {
-		milieu.Info("Done updating batch data, run complete")
 	}
+	milieu.Info("Done updating batch data, starting TX repeat scan.")
+
+	for _, v := range txResults.GetResults() {
+		if !v.IsSuccess {
+			continue
+		}
+		txInfo, err := walletGRPC.GetTransactionInfoByID(v.TransactionId)
+		if err != nil {
+			milieu.CaptureException(err)
+			milieu.Info(err.Error())
+			continue
+		}
+		if err = sql.CreateTransactionDetail(milieu, txInfo); err != nil {
+			milieu.CaptureException(err)
+			milieu.Info(err.Error())
+			continue
+		}
+	}
+	milieu.Info("Done updating batch data, stored excess TX data, payout complete")
 }
 
 func main() {
