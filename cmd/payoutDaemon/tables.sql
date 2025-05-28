@@ -62,12 +62,12 @@ create table public.transaction_details
     is_cancelled    boolean default false    not null,
     excess_sig      bytea                    not null,
     timestamp       timestamp with time zone not null,
-    raw_payment_id  bytea                    not null,
-    mined_at_height numeric                  not null,
-    user_payment_id bytea                    not null,
+    raw_payment_id  bytea,
+    mined_at_height numeric,
+    user_payment_id bytea,
     dest_address    bytea                    not null,
-    rechecked       boolean default false,
-    repaid          boolean
+    rechecked       boolean default false    not null,
+    repaid          boolean default false    not null
 );
 
 alter table public.transaction_details
