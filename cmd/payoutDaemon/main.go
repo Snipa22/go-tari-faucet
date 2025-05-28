@@ -44,6 +44,55 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+func atomicBalanceUpdates(milieu *core.Milieu, daemonResponse *tari_generated.TransferResponse, addressCache map[string]uint64, balanceCache map[string]uint64, batchID int) (successAmount uint64, failedAmount uint64, err error) {
+	for _, v := range daemonResponse.GetResults() {
+		// Each result needs to be handled cleanly
+		milieu.Debug(fmt.Sprintf("Processing transaction: %v for %v", v.TransactionId, addressCache[v.Address]))
+		if v.IsSuccess {
+			successAmount += balanceCache[v.Address]
+		} else {
+			failedAmount += balanceCache[v.Address]
+		}
+		txn, err := milieu.GetTransaction()
+		if err != nil {
+			milieu.CaptureException(err)
+			milieu.Info(err.Error())
+			continue
+		}
+		if v.TransactionId == 0 {
+			// 0 TXN ID's are a problem.  Replace them with something more valid-esque, we shouldn't have any collisions
+			// given how big the uint64 size is.
+			v.TransactionId = rand.Uint64()
+		}
+		txn.Begin(context.Background())
+		defer milieu.CleanupTxn()
+		err = sql.CreateNewTransaction(txn, v.TransactionId, v.IsSuccess, v.FailureMessage, addressCache[v.Address], batchID, balanceCache[v.Address])
+		if err != nil {
+			milieu.CaptureException(err)
+			milieu.Info(err.Error())
+			milieu.CleanupTxn()
+			continue
+		}
+		if !v.IsSuccess {
+			txn.Commit(context.Background())
+			milieu.CleanupTxn()
+			continue
+		}
+		err = sql.DecreaseBalance(txn, addressCache[v.Address], balanceCache[v.Address])
+		if err != nil {
+			milieu.CaptureException(err)
+			milieu.Info(err.Error())
+			milieu.CleanupTxn()
+			continue
+		}
+		txn.Commit(context.Background())
+		milieu.CleanupTxn()
+		client := milieu.GetRedis()
+		client.Del(context.Background(), fmt.Sprintf("bal_bypass_%v", v.Address))
+	}
+	return
+}
+
 func performPayouts(milieu *core.Milieu) {
 	if running {
 		return
@@ -136,6 +185,9 @@ func performPayouts(milieu *core.Milieu) {
 	sentTransactions := make([]*tari_generated.TransferResult, 0)
 	paymentShortList := make([]*tari_generated.PaymentRecipient, 0)
 	batchCount := 0
+	var successAmount uint64 = 0
+	var failedAmount uint64 = 0
+
 	for _, payment := range payments {
 		paymentShortList = append(paymentShortList, payment)
 		if len(paymentShortList) == 20 {
@@ -149,10 +201,20 @@ func performPayouts(milieu *core.Milieu) {
 				}
 				return
 			}
-			for _, v := range txResults.GetResults() {
-				sentTransactions = append(sentTransactions, v)
+			localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, addressCache, balanceCache, batchID)
+			if err != nil {
+				milieu.CaptureException(err)
+				milieu.Info(err.Error())
+				milieu.Debug("Dumping all data in the transaction struct for debugging")
+				for i, v := range paymentShortList {
+					milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+				}
+				return
 			}
+			successAmount += localSuccess
+			failedAmount += localFailure
 			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
+			milieu.Info(fmt.Sprintf("Processed batch: %v/%v", batchCount, len(paymentShortList)/20))
 			batchCount += 1
 		}
 	}
@@ -168,59 +230,18 @@ func performPayouts(milieu *core.Milieu) {
 			}
 			return
 		}
-		for _, v := range txResults.GetResults() {
-			sentTransactions = append(sentTransactions, v)
-		}
-	}
-
-	var successAmount uint64 = 0
-	var failedAmount uint64 = 0
-
-	milieu.Debug("Processing transaction results")
-	for _, v := range sentTransactions {
-		// Each result needs to be handled cleanly
-		milieu.Debug(fmt.Sprintf("Processing transaction: %v for %v", v.TransactionId, addressCache[v.Address]))
-		if v.IsSuccess {
-			successAmount += balanceCache[v.Address]
-		} else {
-			failedAmount += balanceCache[v.Address]
-		}
-		txn, err := milieu.GetTransaction()
+		localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, addressCache, balanceCache, batchID)
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
-			continue
+			milieu.Debug("Dumping all data in the transaction struct for debugging")
+			for i, v := range paymentShortList {
+				milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+			}
+			return
 		}
-		if v.TransactionId == 0 {
-			// 0 TXN ID's are a problem.  Replace them with something more valid-esque, we shouldn't have any collisions
-			// given how big the uint64 size is.
-			v.TransactionId = rand.Uint64()
-		}
-		txn.Begin(context.Background())
-		defer milieu.CleanupTxn()
-		err = sql.CreateNewTransaction(txn, v.TransactionId, v.IsSuccess, v.FailureMessage, addressCache[v.Address], batchID, balanceCache[v.Address])
-		if err != nil {
-			milieu.CaptureException(err)
-			milieu.Info(err.Error())
-			milieu.CleanupTxn()
-			continue
-		}
-		if !v.IsSuccess {
-			txn.Commit(context.Background())
-			milieu.CleanupTxn()
-			continue
-		}
-		err = sql.DecreaseBalance(txn, addressCache[v.Address], balanceCache[v.Address])
-		if err != nil {
-			milieu.CaptureException(err)
-			milieu.Info(err.Error())
-			milieu.CleanupTxn()
-			continue
-		}
-		txn.Commit(context.Background())
-		milieu.CleanupTxn()
-		client := milieu.GetRedis()
-		client.Del(context.Background(), fmt.Sprintf("bal_bypass_%v", v.Address))
+		successAmount += localSuccess
+		failedAmount += localFailure
 	}
 	milieu.Info("Done processing transaction results, updating batch data")
 	err = sql.UpdateBatchAmounts(milieu, batchID, successAmount, failedAmount)
