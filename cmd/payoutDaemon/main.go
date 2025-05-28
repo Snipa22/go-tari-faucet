@@ -202,6 +202,9 @@ func performPayouts(milieu *core.Milieu) {
 			milieu.Info(err.Error())
 			continue
 		}
+		if txInfo.Status == 11 {
+			continue
+		}
 		if err = sql.CreateTransactionDetail(milieu, txInfo); err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
