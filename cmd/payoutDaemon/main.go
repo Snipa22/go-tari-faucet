@@ -214,7 +214,7 @@ func performPayouts(milieu *core.Milieu) {
 			successAmount += localSuccess
 			failedAmount += localFailure
 			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-			milieu.Info(fmt.Sprintf("Processed batch: %v/%v", batchCount, len(paymentShortList)/20))
+			milieu.Info(fmt.Sprintf("Processed batch: %v/%v", batchCount, len(payments)/20))
 			batchCount += 1
 		}
 	}
