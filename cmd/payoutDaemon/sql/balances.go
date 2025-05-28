@@ -72,3 +72,8 @@ func DecreaseBalance(txn pgx.Tx, balanceID uint64, amount uint64) error {
 	_, err := txn.Exec(context.Background(), "update balances set balance = balance - $1, date_last_updated = now() where id = $2", amount, balanceID)
 	return err
 }
+
+func IncreaseBalance(txn pgx.Tx, balanceID uint64, amount uint64) error {
+	_, err := txn.Exec(context.Background(), "update balances set balance = balance + $1, date_last_updated = now(), date_balance_increased = now() where id = $2", amount, balanceID)
+	return err
+}
