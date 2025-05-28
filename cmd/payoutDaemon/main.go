@@ -35,6 +35,7 @@ payoutDaemon is /not/ designed to perform any additional GRPC calls/etc, it is /
 
 var isDryRun bool
 var txnMsg string
+var running = false
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -44,6 +45,13 @@ func getEnv(key, fallback string) string {
 }
 
 func performPayouts(milieu *core.Milieu) {
+	if running {
+		return
+	}
+	running = true
+	defer func() {
+		running = false
+	}()
 	milieu.Info("Starting payouts")
 
 	milieu.Debug("Starting balance fetch")
@@ -125,21 +133,51 @@ func performPayouts(milieu *core.Milieu) {
 
 	milieu.Info(fmt.Sprintf("Batch ID: %v, starting txn send", batchID))
 
-	txResults, err := walletGRPC.SendTransactions(payments)
-	if err != nil {
-		milieu.CaptureException(err)
-		milieu.Info(err.Error())
-		milieu.Debug("Dumping all data in the transaction struct for debugging")
-		for i, v := range payments {
-			milieu.Debug(fmt.Sprintf("Index: %v, data: %v", i, v))
+	sentTransactions := make([]*tari_generated.TransferResult, 0)
+	paymentShortList := make([]*tari_generated.PaymentRecipient, 0)
+	batchCount := 0
+	for _, payment := range payments {
+		paymentShortList = append(paymentShortList, payment)
+		if len(paymentShortList) == 20 {
+			txResults, err := walletGRPC.SendTransactions(paymentShortList)
+			if err != nil {
+				milieu.CaptureException(err)
+				milieu.Info(err.Error())
+				milieu.Debug("Dumping all data in the transaction struct for debugging")
+				for i, v := range paymentShortList {
+					milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+				}
+				return
+			}
+			for _, v := range txResults.GetResults() {
+				sentTransactions = append(sentTransactions, v)
+			}
+			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
+			batchCount += 1
 		}
-		return
 	}
+
+	if len(paymentShortList) > 0 {
+		txResults, err := walletGRPC.SendTransactions(paymentShortList)
+		if err != nil {
+			milieu.CaptureException(err)
+			milieu.Info(err.Error())
+			milieu.Debug("Dumping all data in the transaction struct for debugging")
+			for i, v := range paymentShortList {
+				milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+			}
+			return
+		}
+		for _, v := range txResults.GetResults() {
+			sentTransactions = append(sentTransactions, v)
+		}
+	}
+
 	var successAmount uint64 = 0
 	var failedAmount uint64 = 0
 
 	milieu.Debug("Processing transaction results")
-	for _, v := range txResults.GetResults() {
+	for _, v := range sentTransactions {
 		// Each result needs to be handled cleanly
 		milieu.Debug(fmt.Sprintf("Processing transaction: %v for %v", v.TransactionId, addressCache[v.Address]))
 		if v.IsSuccess {
@@ -192,7 +230,7 @@ func performPayouts(milieu *core.Milieu) {
 	}
 	milieu.Info("Done updating batch data, starting TX repeat scan.")
 
-	for _, v := range txResults.GetResults() {
+	for _, v := range sentTransactions {
 		if !v.IsSuccess {
 			continue
 		}
