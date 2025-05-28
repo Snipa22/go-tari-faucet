@@ -211,6 +211,9 @@ func performPayouts(milieu *core.Milieu) {
 				}
 				return
 			}
+			for _, v := range txResults.GetResults() {
+				sentTransactions = append(sentTransactions, v)
+			}
 			successAmount += localSuccess
 			failedAmount += localFailure
 			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
@@ -237,6 +240,9 @@ func performPayouts(milieu *core.Milieu) {
 			milieu.Debug("Dumping all data in the transaction struct for debugging")
 			for i, v := range paymentShortList {
 				milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+			}
+			for _, v := range txResults.GetResults() {
+				sentTransactions = append(sentTransactions, v)
 			}
 			return
 		}
