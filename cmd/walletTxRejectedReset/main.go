@@ -46,8 +46,9 @@ func main() {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var txID uint64
-		err = rows.Scan(&txID)
+		var txIDInt int64
+		err = rows.Scan(&txIDInt)
+		txID := uint(txIDInt)
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
@@ -95,6 +96,7 @@ func main() {
 		}
 		txn.Commit(context.Background())
 		milieu.Info(fmt.Sprintf("processed txn ID %d and incremented balance for %v by %v", txID, balanceID, amount))
+		milieu.CleanupTxn()
 	}
 	db.Close()
 }
