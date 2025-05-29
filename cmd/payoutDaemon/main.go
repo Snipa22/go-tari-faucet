@@ -195,21 +195,27 @@ func performPayouts(milieu *core.Milieu) {
 			if err != nil {
 				milieu.CaptureException(err)
 				milieu.Info(err.Error())
-				milieu.Debug("Dumping all data in the transaction struct for debugging")
+				milieu.Error("Dumping all data in the transaction struct for debugging")
 				for i, v := range paymentShortList {
-					milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+					milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
 				}
-				return
+				paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
+				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/20))
+				batchCount += 1
+				continue
 			}
 			localSuccess, localFailure, err := atomicBalanceUpdates(milieu, txResults, addressCache, balanceCache, batchID)
 			if err != nil {
 				milieu.CaptureException(err)
 				milieu.Info(err.Error())
-				milieu.Debug("Dumping all data in the transaction struct for debugging")
+				milieu.Error("Dumping all data in the transaction struct for debugging")
 				for i, v := range paymentShortList {
-					milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+					milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
 				}
-				return
+				paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
+				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/20))
+				batchCount += 1
+				continue
 			}
 			for _, v := range txResults.GetResults() {
 				sentTransactions = append(sentTransactions, v)
@@ -227,9 +233,9 @@ func performPayouts(milieu *core.Milieu) {
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
-			milieu.Debug("Dumping all data in the transaction struct for debugging")
+			milieu.Error("Dumping all data in the transaction struct for debugging")
 			for i, v := range paymentShortList {
-				milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
+				milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
 			}
 			return
 		}
@@ -237,14 +243,14 @@ func performPayouts(milieu *core.Milieu) {
 		if err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
-			milieu.Debug("Dumping all data in the transaction struct for debugging")
+			milieu.Error("Dumping all data in the transaction struct for debugging")
 			for i, v := range paymentShortList {
-				milieu.Debug(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
-			}
-			for _, v := range txResults.GetResults() {
-				sentTransactions = append(sentTransactions, v)
+				milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
 			}
 			return
+		}
+		for _, v := range txResults.GetResults() {
+			sentTransactions = append(sentTransactions, v)
 		}
 		successAmount += localSuccess
 		failedAmount += localFailure
