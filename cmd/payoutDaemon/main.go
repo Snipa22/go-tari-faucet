@@ -144,7 +144,7 @@ func performPayouts(milieu *core.Milieu) {
 		totalAmount += sqlBalance.Balance
 		paymentRecipient := &tari_generated.PaymentRecipient{
 			Address:       sqlBalance.Address,
-			Amount:        sqlBalance.Balance,
+			Amount:        sqlBalance.Balance - 1000,
 			FeePerGram:    5,
 			PaymentType:   2,
 			UserPaymentId: nil,
