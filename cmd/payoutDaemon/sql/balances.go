@@ -22,8 +22,17 @@ type BalanceSqlRow struct {
 	PayoutMinimum        uint64
 }
 
-func GetAllBalances(milieu *core.Milieu) ([]BalanceSqlRow, error) {
-	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id, date_added, date_balance_increased, date_last_updated, balance, valid, address, payout_minimum from balances order by balance desc")
+func GetAllBalances(milieu *core.Milieu, balancesSelectOrder int) ([]BalanceSqlRow, error) {
+	orderByStr := ""
+	switch balancesSelectOrder {
+	case 1:
+		orderByStr = " order by balance desc"
+		break
+	case 2:
+		orderByStr = " order by balance asc"
+		break
+	}
+	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id, date_added, date_balance_increased, date_last_updated, balance, valid, address, payout_minimum from balances"+orderByStr)
 	if err != nil {
 		return nil, err
 	}

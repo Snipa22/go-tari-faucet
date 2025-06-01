@@ -36,6 +36,9 @@ payoutDaemon is /not/ designed to perform any additional GRPC calls/etc, it is /
 var isDryRun bool
 var txnMsg string
 var running = false
+var txnsPerBatch = 50
+var haltTxnKey = "payout-daemon-halt-batching"
+var balanceSortOrder = 0
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
@@ -101,10 +104,17 @@ func performPayouts(milieu *core.Milieu) {
 	defer func() {
 		running = false
 	}()
+	blocked := milieu.GetRedis().Exists(context.Background(), haltTxnKey)
+	if blocked.Val() != 0 {
+		// We're blocked by the halt txn key in redis, report and return.
+		milieu.Info("Payout system halted due to redis key set, check with your local admin!")
+		return
+	}
+
 	milieu.Info("Starting payouts")
 
 	milieu.Debug("Starting balance fetch")
-	balances, err := sql.GetAllBalances(milieu)
+	balances, err := sql.GetAllBalances(milieu, balanceSortOrder)
 	if err != nil {
 		milieu.Info(err.Error())
 		milieu.CaptureException(err)
@@ -132,8 +142,7 @@ func performPayouts(milieu *core.Milieu) {
 		}
 		if sqlBalance.Balance < sqlBalance.PayoutMinimum {
 			// Check to see if there's a bypass in redis
-			client := milieu.GetRedis()
-			val := client.Exists(context.Background(), fmt.Sprintf("bal_bypass_%v", sqlBalance.Address))
+			val := milieu.GetRedis().Exists(context.Background(), fmt.Sprintf("bal_bypass_%v", sqlBalance.Address))
 			if val.Val() == 0 {
 				milieu.Debug(fmt.Sprintf("Balance for %v does not get a bypass and is under payout minimum, "+
 					"skipping", sqlBalance.ID))
@@ -144,7 +153,7 @@ func performPayouts(milieu *core.Milieu) {
 		totalAmount += sqlBalance.Balance
 		paymentRecipient := &tari_generated.PaymentRecipient{
 			Address:       sqlBalance.Address,
-			Amount:        sqlBalance.Balance - 1000,
+			Amount:        sqlBalance.Balance - 5000,
 			FeePerGram:    5,
 			PaymentType:   1,
 			UserPaymentId: nil,
@@ -190,7 +199,7 @@ func performPayouts(milieu *core.Milieu) {
 
 	for _, payment := range payments {
 		paymentShortList = append(paymentShortList, payment)
-		if len(paymentShortList) == 20 {
+		if len(paymentShortList) == txnsPerBatch {
 			txResults, err := walletGRPC.SendTransactions(paymentShortList)
 			if err != nil {
 				milieu.CaptureException(err)
@@ -200,7 +209,7 @@ func performPayouts(milieu *core.Milieu) {
 					milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
 				}
 				paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/20))
+				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/txnsPerBatch))
 				batchCount += 1
 				continue
 			}
@@ -213,7 +222,7 @@ func performPayouts(milieu *core.Milieu) {
 					milieu.Error(fmt.Sprintf("Batch: %v Index: %v, data: %v", batchCount, i, v))
 				}
 				paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/20))
+				milieu.Info(fmt.Sprintf("Processed batch WITH ERROR: %v/%v", batchCount, len(payments)/txnsPerBatch))
 				batchCount += 1
 				continue
 			}
@@ -223,7 +232,7 @@ func performPayouts(milieu *core.Milieu) {
 			successAmount += localSuccess
 			failedAmount += localFailure
 			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
-			milieu.Info(fmt.Sprintf("Processed batch: %v/%v", batchCount, len(payments)/20))
+			milieu.Info(fmt.Sprintf("Processed batch: %v/%v", batchCount, len(payments)/txnsPerBatch))
 			batchCount += 1
 		}
 	}
@@ -305,13 +314,32 @@ func main() {
 	runOncePtr := flag.Bool("run-once", false, "Run once and exit")
 	dryRunPtr := flag.Bool("dry-run", false, "Puts the system into dry-run mode, exits right before batch insert")
 	txnMsgPtr := flag.String("txn-msg", "", "Transaction message to attach to a send, max length 256 characters")
+	batchSizePtr := flag.Int("batch-size", 50, "How many TXNs to submit to the wallet in a batch")
+	settxnHalt := flag.Bool("set-txn-halt", false, "Set transaction halt flag in redis")
+	unsetTxnHalt := flag.Bool("unset-txn-halt", false, "Unset transaction halt flag in redis")
+	balanceSelectOrder := flag.Int("balance-select-order", 0, "Select balance order by, 0 for unsorted, 1 for highest, 2 for lowest")
 
 	flag.Parse()
 	txnMsg = *txnMsgPtr
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
+	balanceSortOrder = *balanceSelectOrder
+
+	txnsPerBatch = *batchSizePtr
 
 	if *debugEnabledPtr {
 		milieu.SetLogLevel(logrus.DebugLevel)
+	}
+
+	if *settxnHalt {
+		milieu.Info("Setting transaction halt flag in redis and exiting")
+		milieu.GetRedis().Set(context.Background(), haltTxnKey, 1, 0)
+		return
+	}
+
+	if *unsetTxnHalt {
+		milieu.Info("Unsetting transaction halt flag in redis and exiting")
+		milieu.GetRedis().Del(context.Background(), haltTxnKey)
+		return
 	}
 
 	isDryRun = *dryRunPtr
