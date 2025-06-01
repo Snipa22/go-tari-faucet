@@ -198,6 +198,12 @@ func performPayouts(milieu *core.Milieu) {
 	var failedAmount uint64 = 0
 
 	for _, payment := range payments {
+		if blocked.Val() != 0 {
+			// We're blocked by the halt txn key in redis, report and return.
+			milieu.Info("Payout system halted due to redis key set")
+			paymentShortList = make([]*tari_generated.PaymentRecipient, 0)
+			break
+		}
 		paymentShortList = append(paymentShortList, payment)
 		if len(paymentShortList) == txnsPerBatch {
 			txResults, err := walletGRPC.SendTransactions(paymentShortList)
