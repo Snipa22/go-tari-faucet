@@ -146,7 +146,7 @@ func performPayouts(milieu *core.Milieu) {
 			Address:       sqlBalance.Address,
 			Amount:        sqlBalance.Balance - 1000,
 			FeePerGram:    5,
-			PaymentType:   2,
+			PaymentType:   1,
 			UserPaymentId: nil,
 		}
 		if len(txnMsg) > 0 {
