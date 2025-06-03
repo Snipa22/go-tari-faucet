@@ -198,6 +198,7 @@ func performPayouts(milieu *core.Milieu) {
 	var failedAmount uint64 = 0
 
 	for _, payment := range payments {
+		blocked = milieu.GetRedis().Exists(context.Background(), haltTxnKey)
 		if blocked.Val() != 0 {
 			// We're blocked by the halt txn key in redis, report and return.
 			milieu.Info("Payout system halted due to redis key set")
