@@ -71,7 +71,6 @@ func main() {
 		var txnData *tari_generated.TransactionInfo
 		for _, txn := range walletTransactions {
 			if txn.TxId == id {
-				fmt.Printf("Located matching TXN")
 				txnData = txn
 				break
 			}
