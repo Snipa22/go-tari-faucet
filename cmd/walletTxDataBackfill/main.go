@@ -7,6 +7,7 @@ import (
 	"github.com/Snipa22/core-go-lib/helpers"
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-faucet/cmd/payoutDaemon/sql"
+	"github.com/Snipa22/go-tari-grpc-lib/v2/tari_generated"
 	"github.com/Snipa22/go-tari-grpc-lib/v2/walletGRPC"
 	"github.com/jackc/pgx/v4"
 )
@@ -25,6 +26,8 @@ func main() {
 	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "127.0.0.1:18143", "Tari wallet GRPC address")
 	flag.Parse()
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
+
+	walletTransactions, err := walletGRPC.GetTransactionsInBlock(0)
 
 	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id from transactions where success is true")
 	if err != nil {
@@ -58,10 +61,13 @@ func main() {
 	}
 
 	for _, id := range txnToBackfill {
-		txnData, err := walletGRPC.GetTransactionInfoByID(id)
-		if err != nil {
-			milieu.CaptureException(err)
-			milieu.Info(err.Error())
+		var txnData *tari_generated.TransactionInfo
+		for _, txn := range walletTransactions {
+			if txn.TxId == id {
+				txnData = txn
+			}
+		}
+		if txnData == nil {
 			continue
 		}
 		if err = sql.CreateTransactionDetail(milieu, txnData); err != nil {
