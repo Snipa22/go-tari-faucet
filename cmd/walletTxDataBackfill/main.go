@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"github.com/Snipa22/core-go-lib/helpers"
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-faucet/cmd/payoutDaemon/sql"
@@ -28,6 +29,10 @@ func main() {
 	walletGRPC.InitWalletGRPC(*walletGRPCAddressPtr)
 
 	walletTransactions, err := walletGRPC.GetTransactionsInBlock(0)
+	if err != nil {
+		milieu.CaptureException(err)
+		milieu.Fatal(err.Error())
+	}
 
 	rows, err := milieu.GetRawPGXPool().Query(context.Background(), "select id from transactions where success is true")
 	if err != nil {
@@ -37,13 +42,13 @@ func main() {
 	defer rows.Close()
 	idList := make([]uint64, 0)
 	for rows.Next() {
-		id := new(uint64)
+		var id uint64
 		if err = rows.Scan(&id); err != nil {
 			milieu.CaptureException(err)
 			milieu.Info(err.Error())
 			continue
 		}
-		idList = append(idList, *id)
+		idList = append(idList, id)
 	}
 
 	txnToBackfill := make([]uint64, 0)
@@ -52,7 +57,7 @@ func main() {
 		idScan := new(uint64)
 		if err := row.Scan(&idScan); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				txnToBackfill = append(txnToBackfill, *idScan)
+				txnToBackfill = append(txnToBackfill, id)
 				continue
 			}
 			milieu.CaptureException(err)
@@ -60,11 +65,15 @@ func main() {
 		}
 	}
 
+	fmt.Printf("Backfilling %d/%d transactions, with %d from the wallet\n", len(txnToBackfill), len(idList), len(walletTransactions))
+
 	for _, id := range txnToBackfill {
 		var txnData *tari_generated.TransactionInfo
 		for _, txn := range walletTransactions {
 			if txn.TxId == id {
+				fmt.Printf("Located matching TXN")
 				txnData = txn
+				break
 			}
 		}
 		if txnData == nil {
