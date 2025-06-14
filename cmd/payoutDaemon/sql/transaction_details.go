@@ -30,3 +30,8 @@ func CreateTransactionDetail(milieu *core.Milieu, txnDetail *tari_generated.Tran
 		txnDetail.MinedInBlockHeight, txnDetail.UserPaymentId, txnDetail.DestAddress)
 	return err
 }
+
+func UpdateMinedAtHeight(milieu *core.Milieu, txnDetail *tari_generated.TransactionInfo) error {
+	_, err := milieu.GetRawPGXPool().Exec(context.Background(), "update transaction_details set mined_at_height = $1 where id = $2", txnDetail.MinedInBlockHeight, txnDetail.TxId)
+	return err
+}
