@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,8 +63,8 @@ func TestHandler_Index_RendersWalletBalance(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "1,234,567") {
-		t.Fatalf("expected the formatted balance in the response body, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "1.234567 XTM") {
+		t.Fatalf("expected the formatted XTM balance in the response body, got: %s", rec.Body.String())
 	}
 }
 
@@ -282,8 +281,8 @@ func TestHandler_Request_AmountReflectedInSuccessMessage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Request(rec, req)
 
-	if !strings.Contains(rec.Body.String(), strconv.FormatUint(2500000, 10)) {
-		t.Fatalf("expected the dispense amount in the response body, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "2.5 XTM") {
+		t.Fatalf("expected the XTM-formatted dispense amount in the response body, got: %s", rec.Body.String())
 	}
 }
 
