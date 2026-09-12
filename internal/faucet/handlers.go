@@ -20,11 +20,21 @@ const genericRejectionMessage = "Something went wrong dispensing test Tari. Plea
 // /healthz (liveness probe).
 type Handler struct {
 	Service *Service
+
+	// StatusCache holds the last-known wallet balance/connectivity,
+	// refreshed in the background (see StatusCache.StartPolling).
+	// Index and Healthz read it directly instead of calling
+	// Service.Wallet per request, so no HTTP request ever blocks on a
+	// live wallet GRPC call. Must be non-nil -- NewHandler always
+	// supplies one.
+	StatusCache *StatusCache
 }
 
-// NewHandler builds a Handler around svc.
-func NewHandler(svc *Service) *Handler {
-	return &Handler{Service: svc}
+// NewHandler builds a Handler around svc, reading wallet balance/
+// connectivity from cache instead of svc's WalletClient directly (see
+// StatusCache).
+func NewHandler(svc *Service, cache *StatusCache) *Handler {
+	return &Handler{Service: svc, StatusCache: cache}
 }
 
 // Routes registers this Handler's routes on mux.
@@ -35,10 +45,12 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 }
 
 // Index renders the plain HTML request form, including the wallet's
-// current spendable balance. A balance-lookup failure degrades
-// gracefully -- the form still renders, with "balance unavailable" in
-// place of the figure, rather than erroring the whole page (same
-// principle Healthz's dependency checks already follow).
+// current spendable balance, read from StatusCache -- an in-memory,
+// zero-network-I/O read, never a live wallet GRPC call per request. A
+// stale/failed cache entry degrades gracefully -- the form still
+// renders, with "balance unavailable" in place of the figure, rather
+// than erroring the whole page (same principle Healthz's dependency
+// checks already follow).
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -49,8 +61,8 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := indexData{}
-	balance, err := h.Service.CurrentBalance(r.Context())
-	if err != nil {
+	balance, balanceOK, _, _ := h.StatusCache.Get()
+	if !balanceOK {
 		data.FaucetBalanceErr = true
 	} else {
 		data.FaucetBalance = balance
@@ -120,11 +132,20 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 }
 
 // Healthz reports 200 if both Postgres and the wallet GRPC connection are
-// reachable, 503 otherwise.
+// reachable, 503 otherwise. Postgres is checked live (Repository.Ping)
+// on every call -- that's already fast and unaffected by this change.
+// The wallet check reads StatusCache's last-known connectivity poll
+// instead of dialing the wallet per request, so a slow/hung wallet GRPC
+// call can never delay this response.
 func (h *Handler) Healthz(w http.ResponseWriter, r *http.Request) {
-	if err := h.Service.HealthCheck(r.Context()); err != nil {
+	if err := h.Service.Repo.Ping(r.Context()); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = fmt.Fprintf(w, "unhealthy: %v\n", err)
+		return
+	}
+	if _, _, walletUp, walletUpOK := h.StatusCache.Get(); !walletUpOK || !walletUp {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = fmt.Fprintln(w, "unhealthy: wallet GRPC connectivity is not online")
 		return
 	}
 	w.WriteHeader(http.StatusOK)
