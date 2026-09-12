@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -36,6 +37,7 @@ func main() {
 	sentryServerPtr := flag.String("sentry-server", getEnv("SENTRY_SERVER", ""), "Sentry DSN (env SENTRY_SERVER), optional")
 	dispenseAmountPtr := flag.Uint64("dispense-amount", 1000000, "Amount to dispense per request, in microMinotari")
 	rateLimitWindowPtr := flag.Duration("rate-limit-window", 24*time.Hour, "Minimum time between successful dispenses for the same address or IP")
+	statusPollIntervalPtr := flag.Duration("status-poll-interval", 30*time.Second, "How often to refresh the background-polled wallet balance/connectivity cache used by / and /healthz")
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
 	flag.Parse()
 
@@ -72,15 +74,29 @@ func main() {
 		Logger: logger,
 	}
 
-	handler := faucet.NewHandler(svc)
+	// statusCache holds the last-known wallet balance/connectivity,
+	// refreshed on -status-poll-interval by a background goroutine, so
+	// Handler.Index/Healthz never block a request on a live wallet GRPC
+	// call (WalletClient.GetBalance/GetWalletConnectivity have no
+	// timeout of their own and have been observed in production to
+	// occasionally hang for 10+ seconds over the Tailscale link to the
+	// wallet daemon). main.go has no existing signal-handling shutdown
+	// pattern, so StartPolling just runs for the process lifetime via
+	// context.Background() -- there's nothing to cancel it with today.
+	statusCache := faucet.NewStatusCache()
+	statusCache.Logger = logger
+	go statusCache.StartPolling(context.Background(), svc.Wallet, *statusPollIntervalPtr)
+
+	handler := faucet.NewHandler(svc, statusCache)
 	mux := http.NewServeMux()
 	handler.Routes(mux)
 
 	logger.WithFields(logrus.Fields{
-		"listen_addr":         *listenAddrPtr,
-		"wallet_grpc_address": *walletGRPCAddressPtr,
-		"dispense_amount":     *dispenseAmountPtr,
-		"rate_limit_window":   rateLimitWindowPtr.String(),
+		"listen_addr":          *listenAddrPtr,
+		"wallet_grpc_address":  *walletGRPCAddressPtr,
+		"dispense_amount":      *dispenseAmountPtr,
+		"rate_limit_window":    rateLimitWindowPtr.String(),
+		"status_poll_interval": statusPollIntervalPtr.String(),
 	}).Info("tari-faucet: starting")
 
 	if err := http.ListenAndServe(*listenAddrPtr, mux); err != nil {

@@ -173,14 +173,21 @@ func (s *Service) now() time.Time {
 }
 
 // CurrentBalance returns the wallet's currently spendable (available)
-// balance, in microMinotari, for display on the request form. ctx is
-// accepted for symmetry with HealthCheck/Dispense's context-shaped
-// signatures, even though the underlying WalletClient.GetBalance call
-// (like SendTransactions/GetWalletConnectivity) doesn't take one yet.
-// Handler.Index calls this before rendering the page and degrades
-// gracefully -- a non-nil error here must not fail the whole page, only
-// the balance display (same principle HealthCheck's callers already
-// follow for /healthz).
+// balance, in microMinotari, via a live WalletClient.GetBalance call.
+// ctx is accepted for symmetry with HealthCheck/Dispense's context-
+// shaped signatures, even though the underlying WalletClient.GetBalance
+// call (like SendTransactions/GetWalletConnectivity) doesn't take one
+// yet.
+//
+// Handler.Index does NOT call this directly -- it reads StatusCache
+// instead, so the balance display never blocks a request on a live
+// wallet GRPC call (WalletClient.GetBalance has no timeout and has been
+// observed to occasionally hang for 10+ seconds). StatusCache's
+// background poll loop calls the wallet directly rather than through
+// this method (Repo isn't involved in the balance/connectivity poll at
+// all), so this method today exists as the live/synchronous primitive
+// this package's tests exercise directly; it remains available for any
+// caller that genuinely needs a fresh, uncached read.
 func (s *Service) CurrentBalance(_ context.Context) (uint64, error) {
 	resp, err := s.Wallet.GetBalance()
 	if err != nil {
@@ -195,6 +202,14 @@ func (s *Service) CurrentBalance(_ context.Context) (uint64, error) {
 // HealthCheck reports whether both Postgres (via Repository.Ping) and the
 // wallet GRPC connection (via WalletClient.GetWalletConnectivity) are
 // reachable. A non-nil error means /healthz should return 503.
+//
+// Handler.Healthz does NOT call this directly -- it pings Postgres live
+// (via Service.Repo.Ping, same as here) but reads the wallet's
+// connectivity from StatusCache instead of calling
+// WalletClient.GetWalletConnectivity synchronously per request, for the
+// same no-request-should-block-on-a-live-wallet-call reason
+// CurrentBalance's doc comment describes. This method remains available
+// as the live/synchronous primitive.
 func (s *Service) HealthCheck(ctx context.Context) error {
 	if err := s.Repo.Ping(ctx); err != nil {
 		return err

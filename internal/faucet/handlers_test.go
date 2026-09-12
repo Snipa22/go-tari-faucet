@@ -13,14 +13,25 @@ import (
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
 )
 
+// newTestHandler builds a Handler with an empty StatusCache -- tests that
+// care about the cached balance/connectivity values seed one directly via
+// newTestHandlerWithCache instead.
 func newTestHandler(repo *fakeRepo, wallet *fakeWallet, clock *fakeClock) *Handler {
+	return newTestHandlerWithCache(repo, wallet, clock, NewStatusCache())
+}
+
+// newTestHandlerWithCache is like newTestHandler but lets the caller
+// inject a pre-populated StatusCache, so tests can exercise Index/Healthz
+// reading a fake cached balance/connectivity state directly instead of
+// relying on a live per-request wallet call.
+func newTestHandlerWithCache(repo *fakeRepo, wallet *fakeWallet, clock *fakeClock, cache *StatusCache) *Handler {
 	svc := &Service{
 		Repo:   repo,
 		Wallet: wallet,
 		Clock:  clock,
 		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour},
 	}
-	return NewHandler(svc)
+	return NewHandler(svc, cache)
 }
 
 func TestHandler_Index_RendersForm(t *testing.T) {
@@ -42,7 +53,9 @@ func TestHandler_Index_RendersWalletBalance(t *testing.T) {
 	wallet := &fakeWallet{balanceResp: &tari_generated.GetBalanceResponse{
 		AvailableBalance: 1234567,
 	}}
-	h := newTestHandler(&fakeRepo{}, wallet, &fakeClock{now: time.Now()})
+	cache := NewStatusCache()
+	cache.poll(wallet) // seed the cache directly, as StartPolling would in the background
+	h := newTestHandlerWithCache(&fakeRepo{}, wallet, &fakeClock{now: time.Now()}, cache)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -58,7 +71,9 @@ func TestHandler_Index_RendersWalletBalance(t *testing.T) {
 
 func TestHandler_Index_RendersGracefullyWhenBalanceLookupFails(t *testing.T) {
 	wallet := &fakeWallet{balanceErr: errors.New("grpc: unavailable")}
-	h := newTestHandler(&fakeRepo{}, wallet, &fakeClock{now: time.Now()})
+	cache := NewStatusCache()
+	cache.poll(wallet) // seed the cache directly with the failed poll result
+	h := newTestHandlerWithCache(&fakeRepo{}, wallet, &fakeClock{now: time.Now()}, cache)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -178,26 +193,57 @@ func TestHandler_Request_UsesXForwardedForForRateLimitKey(t *testing.T) {
 
 func TestHandler_Healthz(t *testing.T) {
 	t.Run("200 when healthy", func(t *testing.T) {
-		h := newTestHandler(&fakeRepo{}, &fakeWallet{connectivity: &tari_generated.CheckConnectivityResponse{
+		wallet := &fakeWallet{connectivity: &tari_generated.CheckConnectivityResponse{
 			Status: tari_generated.CheckConnectivityResponse_Online,
-		}}, &fakeClock{now: time.Now()})
+		}}
+		cache := NewStatusCache()
+		cache.poll(wallet)
+		h := newTestHandlerWithCache(&fakeRepo{}, wallet, &fakeClock{now: time.Now()}, cache)
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 		rec := httptest.NewRecorder()
 		h.Healthz(rec, req)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", rec.Code)
+			t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
 		}
 	})
 
 	t.Run("503 when postgres is down", func(t *testing.T) {
-		h := newTestHandler(&fakeRepo{pingErr: errStub}, &fakeWallet{connectivity: &tari_generated.CheckConnectivityResponse{
+		wallet := &fakeWallet{connectivity: &tari_generated.CheckConnectivityResponse{
 			Status: tari_generated.CheckConnectivityResponse_Online,
-		}}, &fakeClock{now: time.Now()})
+		}}
+		cache := NewStatusCache()
+		cache.poll(wallet)
+		h := newTestHandlerWithCache(&fakeRepo{pingErr: errStub}, wallet, &fakeClock{now: time.Now()}, cache)
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 		rec := httptest.NewRecorder()
 		h.Healthz(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+	})
+
+	t.Run("503 when the last wallet connectivity poll was not online", func(t *testing.T) {
+		wallet := &fakeWallet{connectivity: &tari_generated.CheckConnectivityResponse{
+			Status: tari_generated.CheckConnectivityResponse_Offline,
+		}}
+		cache := NewStatusCache()
+		cache.poll(wallet)
+		h := newTestHandlerWithCache(&fakeRepo{}, wallet, &fakeClock{now: time.Now()}, cache)
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		rec := httptest.NewRecorder()
+		h.Healthz(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503, body: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("503 when the cache has never successfully polled", func(t *testing.T) {
+		h := newTestHandlerWithCache(&fakeRepo{}, &fakeWallet{}, &fakeClock{now: time.Now()}, NewStatusCache())
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		rec := httptest.NewRecorder()
+		h.Healthz(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503, body: %s", rec.Code, rec.Body.String())
 		}
 	})
 }
@@ -229,7 +275,7 @@ func TestHandler_Request_AmountReflectedInSuccessMessage(t *testing.T) {
 		Clock:  &fakeClock{now: time.Now()},
 		Config: Config{DispenseAmount: 2500000, RateLimitWindow: time.Hour},
 	}
-	h := NewHandler(svc)
+	h := NewHandler(svc, NewStatusCache())
 	form := url.Values{"address": {valid}}
 	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
