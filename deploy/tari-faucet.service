@@ -1,0 +1,40 @@
+# Reference-only systemd unit for tari-faucet. Not deployed automatically
+# by this repo -- ops should copy this to /etc/systemd/system/tari-faucet.service,
+# adjust paths/users for the target host, and populate
+# /etc/tari-faucet.env with the real secrets (PSQL_SERVER, SENTRY_SERVER)
+# before enabling it.
+#
+# Modeled on this ecosystem's go-tari-explorer/go-tari-netmap unit style:
+# Type=simple, Restart=on-failure, and standard sandboxing directives.
+# Flags are passed on ExecStart; anything secret (the Postgres DSN, Sentry
+# DSN) is expected to come from EnvironmentFile instead of the command line
+# so it doesn't show up in `ps`/journal argv dumps.
+
+[Unit]
+Description=Tari Testnet Faucet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tari-faucet
+Group=tari-faucet
+WorkingDirectory=/opt/tari-faucet
+EnvironmentFile=/etc/tari-faucet.env
+ExecStart=/usr/local/bin/tari-faucet \
+    -listen-addr=0.0.0.0:8091 \
+    -wallet-grpc-address=100.88.139.119:12345 \
+    -dispense-amount=1000000 \
+    -rate-limit-window=24h
+Restart=on-failure
+RestartSec=5
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/tari-faucet
+
+[Install]
+WantedBy=multi-user.target
