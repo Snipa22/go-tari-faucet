@@ -19,9 +19,14 @@ type fakeRepo struct {
 	pingErr   error
 	recorded  []DispenseRecord
 	recordErr error
+	// lookupCalls counts LastSuccessfulDispense invocations, so tests can
+	// assert the rate-limit lookup was never reached (e.g. a
+	// honeypot-tripped request must short-circuit before it).
+	lookupCalls int
 }
 
 func (f *fakeRepo) LastSuccessfulDispense(_ context.Context, address, ip string, since time.Time) (time.Time, bool, error) {
+	f.lookupCalls++
 	if f.lastErr != nil {
 		return time.Time{}, false, f.lastErr
 	}
@@ -64,6 +69,8 @@ type fakeWallet struct {
 	connectivity    *tari_generated.CheckConnectivityResponse
 	connectivityErr error
 	sentRecipients  [][]*tari_generated.PaymentRecipient
+	balanceResp     *tari_generated.GetBalanceResponse
+	balanceErr      error
 }
 
 func (f *fakeWallet) SendTransactions(transactions []*tari_generated.PaymentRecipient) (*tari_generated.TransferResponse, error) {
@@ -79,6 +86,13 @@ func (f *fakeWallet) GetWalletConnectivity() (*tari_generated.CheckConnectivityR
 		return nil, f.connectivityErr
 	}
 	return f.connectivity, nil
+}
+
+func (f *fakeWallet) GetBalance() (*tari_generated.GetBalanceResponse, error) {
+	if f.balanceErr != nil {
+		return nil, f.balanceErr
+	}
+	return f.balanceResp, nil
 }
 
 // fakeClock is a fixed/steppable Clock test double.
@@ -351,4 +365,45 @@ func TestService_HealthCheck(t *testing.T) {
 			t.Fatal("HealthCheck() = nil, want an error when the wallet reports Offline")
 		}
 	})
+}
+
+func TestService_CurrentBalance_ReturnsAvailableBalance(t *testing.T) {
+	svc := &Service{
+		Repo: &fakeRepo{},
+		Wallet: &fakeWallet{balanceResp: &tari_generated.GetBalanceResponse{
+			AvailableBalance: 1234567,
+		}},
+	}
+
+	got, err := svc.CurrentBalance(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentBalance() error = %v, want nil", err)
+	}
+	if got != 1234567 {
+		t.Fatalf("CurrentBalance() = %d, want 1234567", got)
+	}
+}
+
+func TestService_CurrentBalance_PropagatesWalletError(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{balanceErr: errors.New("grpc: unavailable")},
+	}
+
+	_, err := svc.CurrentBalance(context.Background())
+	if err == nil {
+		t.Fatal("CurrentBalance() error = nil, want an error when the wallet call fails")
+	}
+}
+
+func TestService_CurrentBalance_ErrorsOnNilResponse(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+	}
+
+	_, err := svc.CurrentBalance(context.Background())
+	if err == nil {
+		t.Fatal("CurrentBalance() error = nil, want an error when the wallet returns a nil response")
+	}
 }

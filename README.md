@@ -6,6 +6,11 @@ submitted testnet address, rate limited per-address and per-IP. It does not
 perform payouts itself (see `go-tari-tools/cmd/payoutDaemon` for that); it
 owns only its own `dispenses` audit/rate-limit table.
 
+This is the production backend for `testnet-faucet.supportxtm.com`: it
+serves plain HTTP on `-listen-addr` and expects a reverse proxy (Caddy) in
+front of it to terminate TLS and forward the public domain to that
+address.
+
 ## Running
 
 ```
@@ -21,7 +26,7 @@ before first run.
 
 | Flag                   | Env             | Default                  | Description                                             |
 |-------------------------|-----------------|---------------------------|-----------------------------------------------------------|
-| `-listen-addr`          | -               | `0.0.0.0:8091`             | HTTP listen address                                        |
+| `-listen-addr`          | -               | `0.0.0.0:8091`             | HTTP listen address (behind Caddy in production)            |
 | `-wallet-grpc-address`  | -               | `100.88.139.119:12345`     | Tari wallet GRPC address                                    |
 | `-psql-server`          | `PSQL_SERVER`   | *(required)*               | Postgres DSN for this faucet's own database                |
 | `-sentry-server`        | `SENTRY_SERVER` | *(empty, disabled)*        | Sentry DSN, optional                                        |

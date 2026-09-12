@@ -1,6 +1,7 @@
 package faucet
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,6 +35,43 @@ func TestHandler_Index_RendersForm(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "<form") {
 		t.Fatal("expected the index page to contain a <form> element")
+	}
+}
+
+func TestHandler_Index_RendersWalletBalance(t *testing.T) {
+	wallet := &fakeWallet{balanceResp: &tari_generated.GetBalanceResponse{
+		AvailableBalance: 1234567,
+	}}
+	h := newTestHandler(&fakeRepo{}, wallet, &fakeClock{now: time.Now()})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "1,234,567") {
+		t.Fatalf("expected the formatted balance in the response body, got: %s", rec.Body.String())
+	}
+}
+
+func TestHandler_Index_RendersGracefullyWhenBalanceLookupFails(t *testing.T) {
+	wallet := &fakeWallet{balanceErr: errors.New("grpc: unavailable")}
+	h := newTestHandler(&fakeRepo{}, wallet, &fakeClock{now: time.Now()})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "<form") {
+		t.Fatal("expected the index page to still contain a <form> element when the balance lookup fails")
+	}
+	if !strings.Contains(rec.Body.String(), "balance unavailable") {
+		t.Fatalf("expected a graceful 'balance unavailable' message, got: %s", rec.Body.String())
 	}
 }
 
@@ -200,5 +238,68 @@ func TestHandler_Request_AmountReflectedInSuccessMessage(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), strconv.FormatUint(2500000, 10)) {
 		t.Fatalf("expected the dispense amount in the response body, got: %s", rec.Body.String())
+	}
+}
+
+func TestHandler_Request_HoneypotPopulated_RejectedWithoutReachingWalletOrRateLimit(t *testing.T) {
+	valid := validTestnetAddress(t)
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	h := newTestHandler(repo, wallet, &fakeClock{now: time.Now()})
+
+	form := url.Values{
+		"address":         {valid},
+		honeypotFieldName: {"http://spam.example/"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), genericRejectionMessage) {
+		t.Fatalf("expected the generic rejection message, got: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "honeypot") {
+		t.Fatal("the rendered page must not reveal that a honeypot was tripped")
+	}
+	if len(wallet.sentRecipients) != 0 {
+		t.Fatal("wallet.SendTransactions must not be called when the honeypot field is populated")
+	}
+	if repo.lookupCalls != 0 {
+		t.Fatal("the rate-limit lookup must not be reached when the honeypot field is populated")
+	}
+	if len(repo.recorded) != 0 {
+		t.Fatal("no audit row should be recorded for a honeypot-rejected request")
+	}
+}
+
+func TestHandler_Request_EmptyHoneypot_ProceedsNormally(t *testing.T) {
+	valid := validTestnetAddress(t)
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	h := newTestHandler(repo, wallet, &fakeClock{now: time.Now()})
+
+	form := url.Values{
+		"address":         {valid},
+		honeypotFieldName: {""},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if len(wallet.sentRecipients) != 1 {
+		t.Fatalf("expected exactly one wallet call, got %d", len(wallet.sentRecipients))
+	}
+	if repo.lookupCalls != 1 {
+		t.Fatalf("expected exactly one rate-limit lookup, got %d", repo.lookupCalls)
 	}
 }

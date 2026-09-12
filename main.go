@@ -3,6 +3,10 @@
 // client IP, and dispenses a fixed test amount via the wallet GRPC daemon
 // on approval. See internal/faucet for the actual request-handling logic;
 // this file is just flag parsing and dependency wiring.
+//
+// This is the production backend for testnet-faucet.supportxtm.com,
+// fronted by a Caddy reverse proxy that terminates TLS and forwards to
+// -listen-addr; it does not serve TLS itself.
 package main
 
 import (
@@ -26,7 +30,7 @@ func getEnv(key, fallback string) string {
 }
 
 func main() {
-	listenAddrPtr := flag.String("listen-addr", "0.0.0.0:8091", "HTTP listen address")
+	listenAddrPtr := flag.String("listen-addr", "0.0.0.0:8091", "HTTP listen address (fronted by Caddy as testnet-faucet.supportxtm.com in production; this flag is plain HTTP, not TLS)")
 	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "100.88.139.119:12345", "Tari wallet GRPC address")
 	psqlServerPtr := flag.String("psql-server", getEnv("PSQL_SERVER", ""), "Postgres DSN (env PSQL_SERVER), required")
 	sentryServerPtr := flag.String("sentry-server", getEnv("SENTRY_SERVER", ""), "Sentry DSN (env SENTRY_SERVER), optional")
