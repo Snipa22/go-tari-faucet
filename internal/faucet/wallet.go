@@ -7,13 +7,18 @@ import (
 
 // WalletClient is the narrow GRPC surface Service depends on. It mirrors
 // go-tari-lib/walletGRPC's package-level SendTransactions/
-// GetWalletConnectivity functions exactly, just behind an interface so
-// tests can supply a fake wallet instead of dialing a live Tari wallet
-// daemon (same role as go-crypto-pool/internal/backend/chain's
+// GetWalletConnectivity/GetBalances functions exactly, just behind an
+// interface so tests can supply a fake wallet instead of dialing a live
+// Tari wallet daemon (same role as go-crypto-pool/internal/backend/chain's
 // ChainVerifier interface plays for chain RPC calls).
 type WalletClient interface {
 	SendTransactions(transactions []*tari_generated.PaymentRecipient) (*tari_generated.TransferResponse, error)
 	GetWalletConnectivity() (*tari_generated.CheckConnectivityResponse, error)
+	// GetBalance mirrors walletGRPC.GetBalances() exactly (same as
+	// go-crypto-pool's internal/backend/wallet/tari.go GetBalance
+	// implementation for reference on the real response shape) --
+	// AvailableBalance is the immediately spendable figure.
+	GetBalance() (*tari_generated.GetBalanceResponse, error)
 }
 
 // GRPCWalletClient is the production WalletClient, backed by
@@ -31,4 +36,9 @@ func (GRPCWalletClient) SendTransactions(transactions []*tari_generated.PaymentR
 // GetWalletConnectivity wraps walletGRPC.GetWalletConnectivity.
 func (GRPCWalletClient) GetWalletConnectivity() (*tari_generated.CheckConnectivityResponse, error) {
 	return walletGRPC.GetWalletConnectivity()
+}
+
+// GetBalance wraps walletGRPC.GetBalances.
+func (GRPCWalletClient) GetBalance() (*tari_generated.GetBalanceResponse, error) {
+	return walletGRPC.GetBalances()
 }

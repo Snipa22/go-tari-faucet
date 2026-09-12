@@ -172,6 +172,26 @@ func (s *Service) now() time.Time {
 	return s.Clock.Now()
 }
 
+// CurrentBalance returns the wallet's currently spendable (available)
+// balance, in microMinotari, for display on the request form. ctx is
+// accepted for symmetry with HealthCheck/Dispense's context-shaped
+// signatures, even though the underlying WalletClient.GetBalance call
+// (like SendTransactions/GetWalletConnectivity) doesn't take one yet.
+// Handler.Index calls this before rendering the page and degrades
+// gracefully -- a non-nil error here must not fail the whole page, only
+// the balance display (same principle HealthCheck's callers already
+// follow for /healthz).
+func (s *Service) CurrentBalance(_ context.Context) (uint64, error) {
+	resp, err := s.Wallet.GetBalance()
+	if err != nil {
+		return 0, err
+	}
+	if resp == nil {
+		return 0, errors.New("wallet returned no balance response")
+	}
+	return resp.GetAvailableBalance(), nil
+}
+
 // HealthCheck reports whether both Postgres (via Repository.Ping) and the
 // wallet GRPC connection (via WalletClient.GetWalletConnectivity) are
 // reachable. A non-nil error means /healthz should return 503.
