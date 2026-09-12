@@ -1,6 +1,7 @@
 package faucet
 
 import (
+	"fmt"
 	"html/template"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ const honeypotFieldName = "website"
 // repo, just the token values.
 var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 	"commas": formatWithCommas,
+	"xtm":    formatXTM,
 }).Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -147,7 +149,7 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 
   <div class="balance">
     <span class="label">Faucet balance</span>
-    <span class="value">{{if .FaucetBalanceErr}}balance unavailable{{else}}{{commas .FaucetBalance}} microMinotari (spendable){{end}}</span>
+    <span class="value">{{if .FaucetBalanceErr}}balance unavailable{{else}}{{xtm .FaucetBalance}} (spendable){{end}}</span>
   </div>
 
   {{if .Message}}
@@ -188,9 +190,9 @@ type indexData struct {
 }
 
 // formatWithCommas renders n with thousands separators (e.g. 1234567 ->
-// "1,234,567") for human-readable display of microMinotari amounts. A
-// plain manual implementation is fine here -- no need for a full i18n
-// library for this.
+// "1,234,567") for human-readable display of whole-unit amounts. A plain
+// manual implementation is fine here -- no need for a full i18n library
+// for this.
 func formatWithCommas(n uint64) string {
 	s := strconv.FormatUint(n, 10)
 	if len(s) <= 3 {
@@ -203,4 +205,32 @@ func formatWithCommas(n uint64) string {
 	}
 	groups = append([]string{s}, groups...)
 	return strings.Join(groups, ",")
+}
+
+// microMinotariPerXTM is the atomic-unit precision the wallet GRPC and
+// PaymentRecipient work in internally: 1 XTM == 1,000,000 microMinotari.
+const microMinotariPerXTM = 1_000_000
+
+// formatXTM renders a raw microMinotari amount (the atomic unit every
+// internal code path -- Config.DispenseAmount, wallet calls, DB storage,
+// rate-limit math, logging -- continues to use exactly as today) as a
+// human-readable "XTM" display string, e.g. 799178469391 ->
+// "799,178.469391 XTM", or 100000000 -> "100 XTM" when there's no
+// fractional remainder. This is the single shared conversion used by
+// every user-facing string that shows an amount -- callers must not
+// duplicate the div/mod logic.
+//
+// Integer division/modulo is used throughout (never floating point) so
+// the conversion is exact for a money figure: whole is the number of
+// full XTM, frac is the remaining microMinotari, zero-padded to exactly
+// 6 digits (the full atomic-unit precision) before any trailing-zero
+// trimming.
+func formatXTM(n uint64) string {
+	whole := n / microMinotariPerXTM
+	frac := n % microMinotariPerXTM
+	if frac == 0 {
+		return formatWithCommas(whole) + " XTM"
+	}
+	fracStr := strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
+	return formatWithCommas(whole) + "." + fracStr + " XTM"
 }

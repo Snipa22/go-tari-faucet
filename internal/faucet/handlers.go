@@ -107,7 +107,7 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 	switch result.Outcome {
 	case OutcomeSuccess:
 		renderIndex(w, indexData{
-			Message: fmt.Sprintf("Success! Sent %d microMinotari (tx id %d).", h.Service.Config.DispenseAmount, result.TxID),
+			Message: fmt.Sprintf("Success! Sent %s (tx id %d).", formatXTM(h.Service.Config.DispenseAmount), result.TxID),
 		})
 	case OutcomeInvalidAddress:
 		renderIndex(w, indexData{
