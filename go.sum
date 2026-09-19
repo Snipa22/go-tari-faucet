@@ -6,6 +6,8 @@ github.com/Snipa22/core-go-lib v1.2.0 h1:EBhi/CXcartFxVrMzmbzC9wVGHPoa7lgHVY3BKO
 github.com/Snipa22/core-go-lib v1.2.0/go.mod h1:4NMLEWuo0bl180Lwfd4VbvVwUlhhRRUgkzl+mjRDDc8=
 github.com/Snipa22/go-tari-grpc-lib/v3 v3.2.1-0.20260816155812-abc39e19311d h1:CkFtGJUDf/NlRsk8eg6Xw2u8IL6IwtZqC3vb9ulCQFE=
 github.com/Snipa22/go-tari-grpc-lib/v3 v3.2.1-0.20260816155812-abc39e19311d/go.mod h1:PhFhxISrJsqnix9QDy16YuxpbpPEcQzFkixNtJftSx8=
+github.com/Snipa22/go-tari-lib v2.0.0+incompatible h1:3UBf5rhpwaNH5S6HsQH7f041RuU/F3yA8+vePVTzjyI=
+github.com/Snipa22/go-tari-lib v2.0.0+incompatible/go.mod h1:bOkmyIS0qXrLYyXxyoqZqSnwvGPm1/lTu0Xz0bcKQh8=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
