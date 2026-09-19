@@ -12,7 +12,7 @@ import (
 // Tari wallet daemon (same role as go-crypto-pool/internal/backend/chain's
 // ChainVerifier interface plays for chain RPC calls).
 type WalletClient interface {
-	SendTransactions(transactions []*tari_generated.PaymentRecipient) (*tari_generated.TransferResponse, error)
+	SendTransactions(transactions []*tari_generated.PaymentRecipient, singleTx bool) (*tari_generated.TransferResponse, error)
 	GetWalletConnectivity() (*tari_generated.CheckConnectivityResponse, error)
 	// GetBalance mirrors walletGRPC.GetBalances() exactly (same as
 	// go-crypto-pool's internal/backend/wallet/tari.go GetBalance
@@ -29,8 +29,8 @@ type WalletClient interface {
 type GRPCWalletClient struct{}
 
 // SendTransactions wraps walletGRPC.SendTransactions.
-func (GRPCWalletClient) SendTransactions(transactions []*tari_generated.PaymentRecipient) (*tari_generated.TransferResponse, error) {
-	return walletGRPC.SendTransactions(transactions)
+func (GRPCWalletClient) SendTransactions(transactions []*tari_generated.PaymentRecipient, singleTx bool) (*tari_generated.TransferResponse, error) {
+	return walletGRPC.SendTransactions(transactions, singleTx)
 }
 
 // GetWalletConnectivity wraps walletGRPC.GetWalletConnectivity.

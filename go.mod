@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/Snipa22/core-go-lib v1.2.0
-	github.com/Snipa22/go-tari-grpc-lib/v3 v3.2.0
+	github.com/Snipa22/go-tari-grpc-lib/v3 v3.2.1-0.20260816155812-abc39e19311d
 	github.com/Snipa22/go-tari-lib v1.3.0
 	github.com/gtank/ristretto255 v0.2.0
 	github.com/jackc/pgx/v4 v4.18.3
@@ -34,3 +34,6 @@ require (
 	google.golang.org/grpc v1.72.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
+
+// TODO(remove after go-tari-lib PR #19 merges and tags a release): replace with the released version
+replace github.com/Snipa22/go-tari-lib => ../go-tari-lib
