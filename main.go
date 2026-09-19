@@ -19,7 +19,7 @@ import (
 
 	core "github.com/Snipa22/core-go-lib/milieu"
 	"github.com/Snipa22/go-tari-faucet/internal/faucet"
-	"github.com/Snipa22/go-tari-lib/walletGRPC"
+	"github.com/Snipa22/go-tari-lib/v2/walletGRPC"
 	"github.com/sirupsen/logrus"
 )
 
