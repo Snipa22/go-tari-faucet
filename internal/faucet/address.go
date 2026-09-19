@@ -3,7 +3,7 @@ package faucet
 import (
 	"strings"
 
-	"github.com/Snipa22/go-tari-lib/address"
+	"github.com/Snipa22/go-tari-lib/v2/address"
 )
 
 // ValidateAddress checks that raw is a well-formed Tari address (base58,

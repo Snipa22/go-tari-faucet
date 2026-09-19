@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Snipa22/go-tari-lib/address"
+	"github.com/Snipa22/go-tari-lib/v2/address"
 	"github.com/sirupsen/logrus"
 )
 

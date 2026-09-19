@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Snipa22/go-tari-lib/address"
+	"github.com/Snipa22/go-tari-lib/v2/address"
 )
 
 func TestValidateAddress_AcceptsWellFormedAddress(t *testing.T) {
