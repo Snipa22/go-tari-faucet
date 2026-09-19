@@ -94,6 +94,9 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 		return Result{Outcome: OutcomeRateLimited, RetryAfter: retryAfter}
 	}
 
+	// the faucet only ever sends a single recipient per dispense call, so
+	// single_tx is semantically a no-op here — pass false deliberately
+	// rather than leaving it implicit.
 	resp, sendErr := s.Wallet.SendTransactions([]*tari_generated.PaymentRecipient{
 		{
 			Address:     base58Addr,
@@ -101,7 +104,7 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 			FeePerGram:  5,
 			PaymentType: tari_generated.PaymentRecipient_ONE_SIDED,
 		},
-	})
+	}, false)
 
 	rec := DispenseRecord{
 		Address:   base58Addr,

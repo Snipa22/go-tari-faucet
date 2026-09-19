@@ -69,12 +69,14 @@ type fakeWallet struct {
 	connectivity    *tari_generated.CheckConnectivityResponse
 	connectivityErr error
 	sentRecipients  [][]*tari_generated.PaymentRecipient
+	sentSingleTx    []bool
 	balanceResp     *tari_generated.GetBalanceResponse
 	balanceErr      error
 }
 
-func (f *fakeWallet) SendTransactions(transactions []*tari_generated.PaymentRecipient) (*tari_generated.TransferResponse, error) {
+func (f *fakeWallet) SendTransactions(transactions []*tari_generated.PaymentRecipient, singleTx bool) (*tari_generated.TransferResponse, error) {
 	f.sentRecipients = append(f.sentRecipients, transactions)
+	f.sentSingleTx = append(f.sentSingleTx, singleTx)
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
@@ -160,6 +162,9 @@ func TestService_Dispense_SucceedsAndRecordsAuditRow(t *testing.T) {
 	rec := repo.recorded[0]
 	if !rec.Success || rec.Amount != 1000000 || rec.IP != "10.0.0.1" {
 		t.Fatalf("recorded dispense = %+v, unexpected values", rec)
+	}
+	if len(wallet.sentSingleTx) != 1 || wallet.sentSingleTx[0] != false {
+		t.Fatalf("wallet.SendTransactions singleTx = %v, want [false] (faucet dispenses one recipient per call, so single_tx must be passed false)", wallet.sentSingleTx)
 	}
 }
 
