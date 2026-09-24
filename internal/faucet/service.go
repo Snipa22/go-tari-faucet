@@ -75,17 +75,23 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 
 	now := s.now()
 	since := now.Add(-s.Config.RateLimitWindow)
-	last, limited, err := s.Repo.LastSuccessfulDispense(ctx, base58Addr, ip, since)
+	// ReserveDispense does the rate-limit check AND reserves a
+	// placeholder audit row atomically (see its doc comment) -- this is
+	// the fix for the race that let concurrent requests for the same
+	// address/ip all pass a plain "check" SELECT before any of their
+	// "record" INSERTs landed. Nothing below this point may re-derive
+	// the rate-limit decision from a separate, unsynchronized read.
+	reservation, err := s.Repo.ReserveDispense(ctx, base58Addr, ip, s.Config.DispenseAmount, since, now)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"address": base58Addr,
 			"ip":      ip,
 			"error":   err,
-		}).Warn("faucet: rate-limit lookup failed")
+		}).Warn("faucet: rate-limit reservation failed")
 		return Result{Outcome: OutcomeError, Err: err}
 	}
-	if limited {
-		retryAfter := last.Add(s.Config.RateLimitWindow)
+	if reservation.RateLimited {
+		retryAfter := reservation.LastSuccessAt.Add(s.Config.RateLimitWindow)
 		logger.WithFields(logrus.Fields{
 			"address":     base58Addr,
 			"ip":          ip,
@@ -106,33 +112,30 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 		},
 	}, false)
 
-	rec := DispenseRecord{
-		Address:   base58Addr,
-		IP:        ip,
-		Amount:    s.Config.DispenseAmount,
-		CreatedAt: now,
-	}
+	success, errMsg, txID, result := s.buildResult(resp, sendErr)
 
-	result := s.buildResult(resp, sendErr, &rec)
-
-	if recordErr := s.Repo.RecordDispense(ctx, rec); recordErr != nil {
+	// Deliberately outside of ReserveDispense's advisory-lock
+	// transaction -- see FinalizeDispense's doc comment for why this
+	// (potentially slow, wallet-RPC-dependent) write must never hold
+	// that lock.
+	if finalizeErr := s.Repo.FinalizeDispense(ctx, reservation.ID, success, errMsg, txID); finalizeErr != nil {
 		logger.WithFields(logrus.Fields{
 			"address": base58Addr,
 			"ip":      ip,
-			"error":   recordErr,
-		}).Error("faucet: failed to record dispense audit row")
+			"error":   finalizeErr,
+		}).Error("faucet: failed to finalize dispense audit row")
 	}
 
 	logFields := logrus.Fields{
 		"address": base58Addr,
 		"ip":      ip,
 		"amount":  s.Config.DispenseAmount,
-		"success": rec.Success,
+		"success": success,
 	}
-	if rec.Error != "" {
-		logFields["error"] = rec.Error
+	if errMsg != "" {
+		logFields["error"] = errMsg
 	}
-	if rec.Success {
+	if success {
 		logger.WithFields(logFields).Info("faucet: dispense attempt")
 	} else {
 		logger.WithFields(logFields).Warn("faucet: dispense attempt")
@@ -141,31 +144,23 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 	return result
 }
 
-// buildResult interprets the wallet's SendTransactions response and fills
-// in rec's Success/Error/TxID fields for the audit row, returning the
-// Result to send back to the handler.
-func (s *Service) buildResult(resp *tari_generated.TransferResponse, sendErr error, rec *DispenseRecord) Result {
+// buildResult interprets the wallet's SendTransactions response, returning
+// the success/error/txID values the caller records via FinalizeDispense
+// alongside the Result to send back to the handler.
+func (s *Service) buildResult(resp *tari_generated.TransferResponse, sendErr error) (success bool, errMsg string, txID uint64, result Result) {
 	if sendErr != nil {
-		rec.Success = false
-		rec.Error = sendErr.Error()
-		return Result{Outcome: OutcomeError, Err: sendErr}
+		return false, sendErr.Error(), 0, Result{Outcome: OutcomeError, Err: sendErr}
 	}
 	if resp == nil || len(resp.GetResults()) == 0 {
 		err := errors.New("wallet returned no transfer result")
-		rec.Success = false
-		rec.Error = err.Error()
-		return Result{Outcome: OutcomeError, Err: err}
+		return false, err.Error(), 0, Result{Outcome: OutcomeError, Err: err}
 	}
 	txResult := resp.GetResults()[0]
 	if !txResult.GetIsSuccess() {
 		err := errors.New(txResult.GetFailureMessage())
-		rec.Success = false
-		rec.Error = txResult.GetFailureMessage()
-		return Result{Outcome: OutcomeError, Err: err}
+		return false, txResult.GetFailureMessage(), 0, Result{Outcome: OutcomeError, Err: err}
 	}
-	rec.Success = true
-	rec.TxID = txResult.GetTransactionId()
-	return Result{Outcome: OutcomeSuccess, TxID: txResult.GetTransactionId()}
+	return true, "", txResult.GetTransactionId(), Result{Outcome: OutcomeSuccess, TxID: txResult.GetTransactionId()}
 }
 
 func (s *Service) now() time.Time {
