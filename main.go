@@ -35,7 +35,7 @@ func main() {
 	walletGRPCAddressPtr := flag.String("wallet-grpc-address", "100.88.139.119:12345", "Tari wallet GRPC address")
 	psqlServerPtr := flag.String("psql-server", getEnv("PSQL_SERVER", ""), "Postgres DSN (env PSQL_SERVER), required")
 	sentryServerPtr := flag.String("sentry-server", getEnv("SENTRY_SERVER", ""), "Sentry DSN (env SENTRY_SERVER), optional")
-	dispenseAmountPtr := flag.Uint64("dispense-amount", 1000000, "Amount to dispense per request, in microMinotari")
+	dispenseAmountPtr := flag.Uint64("dispense-amount", 10000000000, "Amount to dispense per request, in microMinotari")
 	rateLimitWindowPtr := flag.Duration("rate-limit-window", 24*time.Hour, "Minimum time between successful dispenses for the same address or IP")
 	statusPollIntervalPtr := flag.Duration("status-poll-interval", 30*time.Second, "How often to refresh the background-polled wallet balance/connectivity cache used by / and /healthz")
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
