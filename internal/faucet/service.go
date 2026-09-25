@@ -47,6 +47,14 @@ type Config struct {
 	// known values -- the same binary must be able to display whatever
 	// ticker string a future network needs without a code change.
 	Ticker string
+
+	// NetworkLabel is the exact display word used alongside Ticker in
+	// user-facing branding text (e.g. "Testnet" or "Mainnet"). Like
+	// Ticker, it's taken verbatim from -network-label with no
+	// validation against a fixed set of known values -- there's no
+	// hardcoded testnet/mainnet enum, just whatever label string is
+	// configured.
+	NetworkLabel string
 }
 
 // Service is the faucet's core business logic: address validation, rate
