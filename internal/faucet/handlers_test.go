@@ -89,6 +89,31 @@ func TestHandler_Index_RendersGracefullyWhenBalanceLookupFails(t *testing.T) {
 	}
 }
 
+// TestHandler_Index_AlwaysShowsOotleBurnGuideLink covers that the index
+// page always links to the Ootle L2 burn guide -- unconditionally, not
+// tied to any Message/IsError state -- and that the accompanying note
+// mentions the deployment's configured Ticker (e.g. "tXTM" on testnet,
+// "XTM" on mainnet) rather than a hardcoded ticker.
+func TestHandler_Index_AlwaysShowsOotleBurnGuideLink(t *testing.T) {
+	h := newTestHandler(&fakeRepo{}, &fakeWallet{}, &fakeClock{now: time.Now()})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	const burnGuideURL = "https://ootle.tari.com/guides/burn-minotari/"
+	if !strings.Contains(body, `href="`+burnGuideURL+`"`) {
+		t.Fatalf("expected the index page to link to the Ootle burn guide (%s), got: %s", burnGuideURL, body)
+	}
+	if !strings.Contains(body, "tXTM") {
+		t.Fatalf("expected the burn-guide note to mention the configured ticker (tXTM), got: %s", body)
+	}
+}
+
 func TestHandler_Request_RejectsMalformedAddressWith400(t *testing.T) {
 	h := newTestHandler(&fakeRepo{}, &fakeWallet{}, &fakeClock{now: time.Now()})
 	form := url.Values{"address": {"not-a-real-address"}}

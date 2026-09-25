@@ -142,6 +142,16 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
       height: 1px;
       overflow: hidden;
     }
+    .l2-note {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border-glow);
+      font-size: 0.85rem;
+      color: rgba(240, 236, 228, 0.65);
+    }
+    .l2-note a {
+      color: var(--jag-alexandrite-daylight);
+    }
   </style>
 </head>
 <body>
@@ -166,6 +176,8 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
     <br>
     <button type="submit">Request {{.Ticker}}</button>
   </form>
+
+  <p class="l2-note">Want to use Ootle (L2)? You'll need to burn your {{.Ticker}} first -- see the <a href="https://ootle.tari.com/guides/burn-minotari/" target="_blank" rel="noopener noreferrer">burn guide</a>.</p>
 </body>
 </html>
 `))
