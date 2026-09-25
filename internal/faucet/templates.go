@@ -32,7 +32,7 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Testnet Tari Faucet</title>
+  <title>Testnet tXTM Faucet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Inter:wght@300&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
@@ -144,8 +144,8 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
   </style>
 </head>
 <body>
-  <h1>Testnet Tari Faucet</h1>
-  <p>Enter a testnet Tari address below to receive a small amount of test Tari.</p>
+  <h1>Testnet tXTM Faucet</h1>
+  <p>Enter a testnet Tari address below to receive a small amount of tXTM.</p>
 
   <div class="balance">
     <span class="label">Faucet balance</span>
@@ -163,7 +163,7 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
       <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
     </div>
     <br>
-    <button type="submit">Request test Tari</button>
+    <button type="submit">Request tXTM</button>
   </form>
 </body>
 </html>

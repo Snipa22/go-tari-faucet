@@ -13,7 +13,7 @@ import (
 // shouldn't reveal its real cause to the caller -- currently just the
 // honeypot trip in Request. Kept as a shared constant so the wording
 // stays identical to the "something went wrong" default outcome path.
-const genericRejectionMessage = "Something went wrong dispensing test Tari. Please try again shortly."
+const genericRejectionMessage = "Something went wrong dispensing tXTM. Please try again shortly."
 
 // Handler wires Service into net/http handlers for the faucet's three
 // routes: GET / (the form), POST /request (submit an address), and GET
@@ -118,7 +118,7 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 	case OutcomeRateLimited:
 		renderIndex(w, indexData{
 			Address:    rawAddress,
-			Message:    fmt.Sprintf("This address or IP has already received test Tari recently. Try again after %s.", result.RetryAfter.Format("2006-01-02 15:04:05 MST")),
+			Message:    fmt.Sprintf("This address or IP has already received tXTM recently. Try again after %s.", result.RetryAfter.Format("2006-01-02 15:04:05 MST")),
 			IsError:    true,
 			StatusCode: http.StatusTooManyRequests,
 		})
