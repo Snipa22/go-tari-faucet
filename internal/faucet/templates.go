@@ -27,12 +27,13 @@ const honeypotFieldName = "website"
 var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 	"commas": formatWithCommas,
 	"xtm":    formatXTM,
+	"lower":  strings.ToLower,
 }).Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Testnet {{.Ticker}} Faucet</title>
+  <title>{{.NetworkLabel}} {{.Ticker}} Faucet</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Inter:wght@300&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
@@ -144,8 +145,8 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
   </style>
 </head>
 <body>
-  <h1>Testnet {{.Ticker}} Faucet</h1>
-  <p>Enter a testnet Tari address below to receive a small amount of {{.Ticker}}.</p>
+  <h1>{{.NetworkLabel}} {{.Ticker}} Faucet</h1>
+  <p>Enter a {{.NetworkLabel | lower}} Tari address below to receive a small amount of {{.Ticker}}.</p>
 
   <div class="balance">
     <span class="label">Faucet balance</span>
@@ -181,6 +182,14 @@ type indexData struct {
 	// in on every call so callers building indexData literals don't
 	// each need to remember to set it.
 	Ticker string
+
+	// NetworkLabel is the display word used alongside Ticker in the
+	// page's branding text (title, h1, intro paragraph) -- e.g.
+	// "Testnet" or "Mainnet", sourced from Service.Config.NetworkLabel.
+	// Like Ticker, renderIndex fills this in on every call so callers
+	// building indexData literals don't each need to remember to set
+	// it.
+	NetworkLabel string
 
 	// FaucetBalance is the wallet's current spendable (available)
 	// balance in microMinotari. Only meaningful when FaucetBalanceErr is

@@ -28,7 +28,7 @@ func newTestHandlerWithCache(repo *fakeRepo, wallet *fakeWallet, clock *fakeCloc
 		Repo:   repo,
 		Wallet: wallet,
 		Clock:  clock,
-		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: "tXTM"},
+		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: "tXTM", NetworkLabel: "Testnet"},
 	}
 	return NewHandler(svc, cache)
 }
@@ -353,7 +353,10 @@ func TestHandler_Request_EmptyHoneypot_ProceedsNormally(t *testing.T) {
 // page's branding text (title, h1, intro paragraph, submit button) is
 // driven entirely by Config.Ticker, not a hardcoded "tXTM"/"Tari" -- both
 // the testnet ("tXTM") and mainnet ("XTM") ticker strings must render
-// correctly from the same binary.
+// correctly from the same binary. NetworkLabel is held fixed at
+// "Testnet" here (its own configurability is covered separately by
+// TestHandler_Index_NetworkLabelIsConfigurable) so this test isolates
+// Ticker's effect.
 func TestHandler_Index_TickerBrandingIsConfigurable(t *testing.T) {
 	for _, ticker := range []string{"tXTM", "XTM"} {
 		t.Run(ticker, func(t *testing.T) {
@@ -361,7 +364,7 @@ func TestHandler_Index_TickerBrandingIsConfigurable(t *testing.T) {
 				Repo:   &fakeRepo{},
 				Wallet: &fakeWallet{},
 				Clock:  &fakeClock{now: time.Now()},
-				Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: ticker},
+				Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: ticker, NetworkLabel: "Testnet"},
 			}
 			h := NewHandler(svc, NewStatusCache())
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -388,6 +391,55 @@ func TestHandler_Index_TickerBrandingIsConfigurable(t *testing.T) {
 			// of Config.Ticker.
 			if !strings.Contains(body, "Tari address") {
 				t.Fatalf("expected the 'Tari address' label/placeholder to remain untouched, got: %s", body)
+			}
+		})
+	}
+}
+
+// TestHandler_Index_NetworkLabelIsConfigurable covers that the index
+// page's title/h1/intro-paragraph network label is driven by
+// Config.NetworkLabel rather than a hardcoded "Testnet", and that the
+// default zero-value-equivalent config ("Testnet"/"tXTM") renders
+// byte-identically to the pre-NetworkLabel wording, while a mainnet
+// config ("Mainnet"/"XTM") renders correctly too -- proving the same
+// binary can serve either without a hardcoded testnet/mainnet switch.
+func TestHandler_Index_NetworkLabelIsConfigurable(t *testing.T) {
+	tests := []struct {
+		networkLabel   string
+		ticker         string
+		wantTitle      string
+		wantH1         string
+		wantIntroLabel string // the lowercased label as it appears in the intro paragraph
+	}{
+		{networkLabel: "Testnet", ticker: "tXTM", wantTitle: "Testnet tXTM Faucet", wantH1: "Testnet tXTM Faucet", wantIntroLabel: "testnet"},
+		{networkLabel: "Mainnet", ticker: "XTM", wantTitle: "Mainnet XTM Faucet", wantH1: "Mainnet XTM Faucet", wantIntroLabel: "mainnet"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.networkLabel, func(t *testing.T) {
+			svc := &Service{
+				Repo:   &fakeRepo{},
+				Wallet: &fakeWallet{},
+				Clock:  &fakeClock{now: time.Now()},
+				Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: tt.ticker, NetworkLabel: tt.networkLabel},
+			}
+			h := NewHandler(svc, NewStatusCache())
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+
+			h.Index(rec, req)
+
+			body := rec.Body.String()
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+			}
+			for _, want := range []string{
+				"<title>" + tt.wantTitle + "</title>",
+				"<h1>" + tt.wantH1 + "</h1>",
+				"Enter a " + tt.wantIntroLabel + " Tari address below",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("expected body to contain %q, got: %s", want, body)
+				}
 			}
 		})
 	}
