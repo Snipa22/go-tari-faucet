@@ -40,6 +40,13 @@ type Result struct {
 type Config struct {
 	DispenseAmount  uint64
 	RateLimitWindow time.Duration
+
+	// Ticker is the exact display word used for user-facing branding
+	// text (e.g. "tXTM" on testnet, "XTM" on mainnet). It's taken
+	// verbatim from -ticker with no validation against a fixed set of
+	// known values -- the same binary must be able to display whatever
+	// ticker string a future network needs without a code change.
+	Ticker string
 }
 
 // Service is the faucet's core business logic: address validation, rate

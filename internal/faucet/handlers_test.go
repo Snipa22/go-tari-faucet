@@ -28,7 +28,7 @@ func newTestHandlerWithCache(repo *fakeRepo, wallet *fakeWallet, clock *fakeCloc
 		Repo:   repo,
 		Wallet: wallet,
 		Clock:  clock,
-		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour},
+		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: "tXTM"},
 	}
 	return NewHandler(svc, cache)
 }
@@ -305,7 +305,7 @@ func TestHandler_Request_HoneypotPopulated_RejectedWithoutReachingWalletOrRateLi
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400, body: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), genericRejectionMessage) {
+	if !strings.Contains(rec.Body.String(), genericRejectionMessage("tXTM")) {
 		t.Fatalf("expected the generic rejection message, got: %s", rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), "honeypot") {
@@ -346,5 +346,119 @@ func TestHandler_Request_EmptyHoneypot_ProceedsNormally(t *testing.T) {
 	}
 	if repo.lookupCalls != 1 {
 		t.Fatalf("expected exactly one rate-limit lookup, got %d", repo.lookupCalls)
+	}
+}
+
+// TestHandler_Index_TickerBrandingIsConfigurable covers that the index
+// page's branding text (title, h1, intro paragraph, submit button) is
+// driven entirely by Config.Ticker, not a hardcoded "tXTM"/"Tari" -- both
+// the testnet ("tXTM") and mainnet ("XTM") ticker strings must render
+// correctly from the same binary.
+func TestHandler_Index_TickerBrandingIsConfigurable(t *testing.T) {
+	for _, ticker := range []string{"tXTM", "XTM"} {
+		t.Run(ticker, func(t *testing.T) {
+			svc := &Service{
+				Repo:   &fakeRepo{},
+				Wallet: &fakeWallet{},
+				Clock:  &fakeClock{now: time.Now()},
+				Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: ticker},
+			}
+			h := NewHandler(svc, NewStatusCache())
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+
+			h.Index(rec, req)
+
+			body := rec.Body.String()
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+			}
+			for _, want := range []string{
+				"<title>Testnet " + ticker + " Faucet</title>",
+				"<h1>Testnet " + ticker + " Faucet</h1>",
+				"receive a small amount of " + ticker + ".",
+				"<button type=\"submit\">Request " + ticker + "</button>",
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("expected body to contain %q, got: %s", want, body)
+				}
+			}
+			// "Tari address" wording refers to the address format, not
+			// the network ticker, and must remain untouched regardless
+			// of Config.Ticker.
+			if !strings.Contains(body, "Tari address") {
+				t.Fatalf("expected the 'Tari address' label/placeholder to remain untouched, got: %s", body)
+			}
+		})
+	}
+}
+
+// TestHandler_Request_HoneypotMessage_UsesConfiguredTicker covers that
+// the honeypot rejection message is built from Config.Ticker for both
+// the testnet and mainnet ticker strings, rather than a hardcoded
+// "tXTM"/"test Tari".
+func TestHandler_Request_HoneypotMessage_UsesConfiguredTicker(t *testing.T) {
+	for _, ticker := range []string{"tXTM", "XTM"} {
+		t.Run(ticker, func(t *testing.T) {
+			valid := validTestnetAddress(t)
+			svc := &Service{
+				Repo:   &fakeRepo{},
+				Wallet: &fakeWallet{sendResp: successResponse(1)},
+				Clock:  &fakeClock{now: time.Now()},
+				Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: ticker},
+			}
+			h := NewHandler(svc, NewStatusCache())
+
+			form := url.Values{
+				"address":         {valid},
+				honeypotFieldName: {"http://spam.example/"},
+			}
+			req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+
+			h.Request(rec, req)
+
+			if !strings.Contains(rec.Body.String(), genericRejectionMessage(ticker)) {
+				t.Fatalf("expected the ticker-specific rejection message, got: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandler_Request_RateLimitedMessage_UsesConfiguredTicker covers that
+// the rate-limited message is built from Config.Ticker for both the
+// testnet and mainnet ticker strings.
+func TestHandler_Request_RateLimitedMessage_UsesConfiguredTicker(t *testing.T) {
+	for _, ticker := range []string{"tXTM", "XTM"} {
+		t.Run(ticker, func(t *testing.T) {
+			valid := validTestnetAddress(t)
+			base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			repo := &fakeRepo{lastByKey: map[string]time.Time{
+				"addr:" + valid: base,
+			}}
+			svc := &Service{
+				Repo:   repo,
+				Wallet: &fakeWallet{sendResp: successResponse(1)},
+				Clock:  &fakeClock{now: base.Add(time.Minute)},
+				Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: ticker},
+			}
+			h := NewHandler(svc, NewStatusCache())
+
+			form := url.Values{"address": {valid}}
+			req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.RemoteAddr = "192.0.2.55:1234"
+			rec := httptest.NewRecorder()
+
+			h.Request(rec, req)
+
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want 429, body: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "already received "+ticker+" recently") {
+				t.Fatalf("expected the ticker-specific rate-limited message, got: %s", rec.Body.String())
+			}
+		})
 	}
 }
