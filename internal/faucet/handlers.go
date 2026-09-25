@@ -9,11 +9,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// genericRejectionMessage is rendered for any request rejection that
-// shouldn't reveal its real cause to the caller -- currently just the
-// honeypot trip in Request. Kept as a shared constant so the wording
-// stays identical to the "something went wrong" default outcome path.
-const genericRejectionMessage = "Something went wrong dispensing test Tari. Please try again shortly."
+// genericRejectionMessage builds the message rendered for any request
+// rejection that shouldn't reveal its real cause to the caller --
+// currently just the honeypot trip in Request. Kept as a shared helper
+// so the wording stays identical to the "something went wrong" default
+// outcome path, parameterized by ticker (e.g. "tXTM"/"XTM") rather than
+// a hardcoded package-level constant.
+func genericRejectionMessage(ticker string) string {
+	return fmt.Sprintf("Something went wrong dispensing %s. Please try again shortly.", ticker)
+}
 
 // Handler wires Service into net/http handlers for the faucet's three
 // routes: GET / (the form), POST /request (submit an address), and GET
@@ -67,7 +71,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data.FaucetBalance = balance
 	}
-	renderIndex(w, data)
+	h.renderIndex(w, data)
 }
 
 // Request handles the form submission: rejects honeypot-tripped spam,
@@ -81,7 +85,7 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		renderIndex(w, indexData{Message: "Could not parse form submission.", IsError: true})
+		h.renderIndex(w, indexData{Message: "Could not parse form submission.", IsError: true})
 		return
 	}
 	rawAddress := r.FormValue("address")
@@ -95,9 +99,9 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 		logger.WithFields(logrus.Fields{
 			"ip": ip,
 		}).Info("faucet: honeypot field populated, rejecting as spam")
-		renderIndex(w, indexData{
+		h.renderIndex(w, indexData{
 			Address: rawAddress,
-			Message: genericRejectionMessage,
+			Message: genericRejectionMessage(h.Service.Config.Ticker),
 			IsError: true,
 		})
 		return
@@ -106,26 +110,26 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 	result := h.Service.Dispense(r.Context(), rawAddress, ip)
 	switch result.Outcome {
 	case OutcomeSuccess:
-		renderIndex(w, indexData{
+		h.renderIndex(w, indexData{
 			Message: fmt.Sprintf("Success! Sent %s (tx id %d).", formatXTM(h.Service.Config.DispenseAmount), result.TxID),
 		})
 	case OutcomeInvalidAddress:
-		renderIndex(w, indexData{
+		h.renderIndex(w, indexData{
 			Address: rawAddress,
 			Message: fmt.Sprintf("That doesn't look like a valid Tari address: %v", describeAddressError(result.Err)),
 			IsError: true,
 		})
 	case OutcomeRateLimited:
-		renderIndex(w, indexData{
+		h.renderIndex(w, indexData{
 			Address:    rawAddress,
-			Message:    fmt.Sprintf("This address or IP has already received test Tari recently. Try again after %s.", result.RetryAfter.Format("2006-01-02 15:04:05 MST")),
+			Message:    fmt.Sprintf("This address or IP has already received %s recently. Try again after %s.", h.Service.Config.Ticker, result.RetryAfter.Format("2006-01-02 15:04:05 MST")),
 			IsError:    true,
 			StatusCode: http.StatusTooManyRequests,
 		})
 	default:
-		renderIndex(w, indexData{
+		h.renderIndex(w, indexData{
 			Address: rawAddress,
-			Message: genericRejectionMessage,
+			Message: genericRejectionMessage(h.Service.Config.Ticker),
 			IsError: true,
 		})
 	}
@@ -164,7 +168,11 @@ func describeAddressError(err error) string {
 	return err.Error()
 }
 
-func renderIndex(w http.ResponseWriter, data indexData) {
+// renderIndex renders data through indexTemplate, filling in Ticker from
+// h.Service.Config so every call site gets the configured branding word
+// without having to set it on each indexData literal itself.
+func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
+	data.Ticker = h.Service.Config.Ticker
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	switch {
 	case data.StatusCode != 0:

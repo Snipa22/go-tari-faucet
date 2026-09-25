@@ -37,6 +37,7 @@ func main() {
 	sentryServerPtr := flag.String("sentry-server", getEnv("SENTRY_SERVER", ""), "Sentry DSN (env SENTRY_SERVER), optional")
 	dispenseAmountPtr := flag.Uint64("dispense-amount", 10000000000, "Amount to dispense per request, in microMinotari")
 	rateLimitWindowPtr := flag.Duration("rate-limit-window", 24*time.Hour, "Minimum time between successful dispenses for the same address or IP")
+	tickerPtr := flag.String("ticker", "tXTM", "Display ticker word used in the faucet's user-facing branding text (e.g. \"tXTM\" on testnet, \"XTM\" on mainnet); defaults to the testnet ticker, matching the default -wallet-grpc-address")
 	statusPollIntervalPtr := flag.Duration("status-poll-interval", 30*time.Second, "How often to refresh the background-polled wallet balance/connectivity cache used by / and /healthz")
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
 	flag.Parse()
@@ -70,6 +71,7 @@ func main() {
 		Config: faucet.Config{
 			DispenseAmount:  *dispenseAmountPtr,
 			RateLimitWindow: *rateLimitWindowPtr,
+			Ticker:          *tickerPtr,
 		},
 		Logger: logger,
 	}
@@ -97,6 +99,7 @@ func main() {
 		"dispense_amount":      *dispenseAmountPtr,
 		"rate_limit_window":    rateLimitWindowPtr.String(),
 		"status_poll_interval": statusPollIntervalPtr.String(),
+		"ticker":               *tickerPtr,
 	}).Info("tari-faucet: starting")
 
 	if err := http.ListenAndServe(*listenAddrPtr, mux); err != nil {
