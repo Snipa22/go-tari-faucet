@@ -55,6 +55,15 @@ type Config struct {
 	// hardcoded testnet/mainnet enum, just whatever label string is
 	// configured.
 	NetworkLabel string
+
+	// NetworkNickname is an optional display word used in parentheses
+	// after NetworkLabel in the intro paragraph (e.g. "Esme" for
+	// Esmeralda testnet). Taken verbatim from -network-nickname with no
+	// validation against a fixed set of known values. Empty string means
+	// no nickname display -- the parenthetical is omitted entirely from
+	// the intro paragraph, allowing the same binary to serve networks
+	// with and without a nickname.
+	NetworkNickname string
 }
 
 // Service is the faucet's core business logic: address validation, rate

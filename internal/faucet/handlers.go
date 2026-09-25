@@ -168,13 +168,14 @@ func describeAddressError(err error) string {
 	return err.Error()
 }
 
-// renderIndex renders data through indexTemplate, filling in Ticker and
-// NetworkLabel from h.Service.Config so every call site gets the
-// configured branding words without having to set them on each
+// renderIndex renders data through indexTemplate, filling in Ticker,
+// NetworkLabel, and NetworkNickname from h.Service.Config so every call site
+// gets the configured branding words without having to set them on each
 // indexData literal itself.
 func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
 	data.Ticker = h.Service.Config.Ticker
 	data.NetworkLabel = h.Service.Config.NetworkLabel
+	data.NetworkNickname = h.Service.Config.NetworkNickname
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	switch {
 	case data.StatusCode != 0:
