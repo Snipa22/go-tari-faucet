@@ -156,7 +156,7 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 </head>
 <body>
   <h1>{{.NetworkLabel}} {{.Ticker}} Faucet</h1>
-  <p>Enter a {{.NetworkLabel | lower}} Tari address below to receive a small amount of {{.Ticker}}.</p>
+  <p>Enter a {{.NetworkLabel | lower}}{{if .NetworkNickname}} ({{.NetworkNickname}}){{end}} Tari address below to receive a small amount of {{.Ticker}}.</p>
 
   <div class="balance">
     <span class="label">Faucet balance</span>
@@ -202,6 +202,14 @@ type indexData struct {
 	// building indexData literals don't each need to remember to set
 	// it.
 	NetworkLabel string
+
+	// NetworkNickname is the optional display word used in parentheses
+	// after NetworkLabel in the intro paragraph (e.g. "Esme" for
+	// Esmeralda testnet), sourced from Service.Config.NetworkNickname.
+	// Empty string means no nickname display -- renderIndex fills this
+	// in on every call so callers building indexData literals don't each
+	// need to remember to set it.
+	NetworkNickname string
 
 	// FaucetBalance is the wallet's current spendable (available)
 	// balance in microMinotari. Only meaningful when FaucetBalanceErr is

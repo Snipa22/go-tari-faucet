@@ -539,3 +539,64 @@ func TestHandler_Request_RateLimitedMessage_UsesConfiguredTicker(t *testing.T) {
 		})
 	}
 }
+
+// TestHandler_Index_NetworkNicknameRendersInIntroWithDefaultConfig covers
+// that when using the default config (NetworkLabel="Testnet",
+// Ticker="tXTM", NetworkNickname="Esme"), the intro paragraph renders
+// with the nickname in parentheses: "Enter a testnet (Esme) Tari address
+// below to receive a small amount of tXTM." -- this is the exact live
+// production wording that was requested.
+func TestHandler_Index_NetworkNicknameRendersInIntroWithDefaultConfig(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: "tXTM", NetworkLabel: "Testnet", NetworkNickname: "Esme"},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+	}
+	wantExactIntro := "Enter a testnet (Esme) Tari address below to receive a small amount of tXTM."
+	if !strings.Contains(body, wantExactIntro) {
+		t.Fatalf("expected the exact intro paragraph %q, got: %s", wantExactIntro, body)
+	}
+}
+
+// TestHandler_Index_NetworkNicknameOmittedWhenEmpty covers that when
+// NetworkNickname is empty (e.g. for a hypothetical mainnet deploy with no
+// nickname), the parenthetical is omitted entirely and the intro paragraph
+// reads "Enter a mainnet Tari address below to receive a small amount of
+// XTM." with no stray parentheses or spacing artifacts.
+func TestHandler_Index_NetworkNicknameOmittedWhenEmpty(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: "XTM", NetworkLabel: "Mainnet", NetworkNickname: ""},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+	}
+	wantExactIntro := "Enter a mainnet Tari address below to receive a small amount of XTM."
+	if !strings.Contains(body, wantExactIntro) {
+		t.Fatalf("expected the exact intro paragraph %q, got: %s", wantExactIntro, body)
+	}
+	// Verify no stray parentheses or odd spacing
+	if strings.Contains(body, "mainnet ()") || strings.Contains(body, "mainnet  Tari") {
+		t.Fatalf("expected no stray parentheses or spacing artifacts in intro, got: %s", body)
+	}
+}
