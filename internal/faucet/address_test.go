@@ -63,3 +63,31 @@ func TestValidateAddress_RejectsTruncatedValidAddress(t *testing.T) {
 		t.Logf("truncated address rejected with: %v", err)
 	}
 }
+
+func TestValidateAddress_RejectsPaymentIDAddress(t *testing.T) {
+	withPaymentID := validDualTestnetAddress(t, true)
+	_, base58, err := ValidateAddress(withPaymentID)
+	if !errors.Is(err, ErrPaymentIDNotAllowed) {
+		t.Fatalf("ValidateAddress(%q) error = %v, want ErrPaymentIDNotAllowed", withPaymentID, err)
+	}
+	if base58 != "" {
+		t.Fatalf("ValidateAddress returned base58 = %q on the payment-id rejection path, want empty string", base58)
+	}
+}
+
+func TestValidateAddress_AcceptsDualAddressWithoutPaymentID(t *testing.T) {
+	plain := validDualTestnetAddress(t, false)
+	addr, base58, err := ValidateAddress(plain)
+	if err != nil {
+		t.Fatalf("ValidateAddress(%q) returned unexpected error: %v", plain, err)
+	}
+	if base58 == "" {
+		t.Fatal("ValidateAddress returned an empty base58 string for a valid dual address")
+	}
+	if addr.Kind() != address.KindDual {
+		t.Fatalf("ValidateAddress returned kind %v, want KindDual", addr.Kind())
+	}
+	if addr.Features().Contains(address.FeaturePaymentID) {
+		t.Fatal("ValidateAddress accepted an address whose features unexpectedly include FeaturePaymentID")
+	}
+}

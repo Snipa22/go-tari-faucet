@@ -165,6 +165,9 @@ func describeAddressError(err error) string {
 	if errors.Is(err, address.ErrInvalidAddressString) {
 		return "could not recognize the address format"
 	}
+	if errors.Is(err, ErrPaymentIDNotAllowed) {
+		return "addresses containing a payment id are not accepted by this faucet — please submit a plain address without a payment id"
+	}
 	return err.Error()
 }
 
