@@ -600,3 +600,10 @@ func TestHandler_Index_NetworkNicknameOmittedWhenEmpty(t *testing.T) {
 		t.Fatalf("expected no stray parentheses or spacing artifacts in intro, got: %s", body)
 	}
 }
+
+func TestDescribeAddressError_PaymentIDRejection(t *testing.T) {
+	got := describeAddressError(ErrPaymentIDNotAllowed)
+	if !strings.Contains(got, "payment id") {
+		t.Fatalf("describeAddressError(ErrPaymentIDNotAllowed) = %q, want it to mention \"payment id\"", got)
+	}
+}

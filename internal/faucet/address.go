@@ -1,10 +1,18 @@
 package faucet
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/Snipa22/go-tari-lib/v2/address"
 )
+
+// ErrPaymentIDNotAllowed is a faucet-specific policy rejection, not an
+// address.Parse error -- the address is perfectly well-formed, but this
+// faucet only ever dispenses to a plain destination address and has no
+// legitimate use for payment IDs, so any address carrying the
+// PAYMENT_ID feature bit is refused here rather than in go-tari-lib.
+var ErrPaymentIDNotAllowed = errors.New("payment-id-bearing addresses are not accepted by this faucet")
 
 // ValidateAddress checks that raw is a well-formed Tari address (base58,
 // hex, or emoji encoding -- anything address.Parse accepts) using go-tari-
@@ -20,6 +28,9 @@ func ValidateAddress(raw string) (address.Address, string, error) {
 	addr, err := address.Parse(trimmed)
 	if err != nil {
 		return address.Address{}, "", err
+	}
+	if addr.Features().Contains(address.FeaturePaymentID) {
+		return address.Address{}, "", ErrPaymentIDNotAllowed
 	}
 	return addr, addr.Base58(), nil
 }
