@@ -175,7 +175,7 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 	switch result.Outcome {
 	case OutcomeSuccess:
 		h.renderIndex(w, indexData{
-			Message: fmt.Sprintf("Success! Sent %s (tx id %d).", formatXTM(h.Service.Config.DispenseAmount), result.TxID),
+			Message: fmt.Sprintf("Success! Sent %s (tx id %d).", formatXTM(result.Amount), result.TxID),
 		})
 	case OutcomeInvalidAddress:
 		h.renderIndex(w, indexData{
@@ -245,6 +245,8 @@ func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
 	data.NetworkNickname = h.Service.Config.NetworkNickname
 	data.TurnstileEnabled = h.Service.Config.TurnstileEnabled
 	data.TurnstileSiteKey = h.Service.Config.TurnstileSiteKey
+	data.DispenseAmount = h.Service.Config.DispenseAmount
+	data.MaxDispenseAmount = h.Service.Config.MaxDispenseAmount
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	switch {
 	case data.StatusCode != 0:
