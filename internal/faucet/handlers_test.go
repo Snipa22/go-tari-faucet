@@ -114,6 +114,105 @@ func TestHandler_Index_AlwaysShowsOotleBurnGuideLink(t *testing.T) {
 	}
 }
 
+// TestHandler_Index_TurnstileOffByDefault_NoFootprint covers the "byte-
+// identical to today for the default case" requirement: with a
+// zero-value Config (TurnstileEnabled false, TurnstileSiteKey empty),
+// the rendered / page must have zero Turnstile footprint -- no
+// cf-turnstile widget div, no challenges.cloudflare.com script tag.
+func TestHandler_Index_TurnstileOffByDefault_NoFootprint(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{DispenseAmount: 1000000, RateLimitWindow: time.Hour, Ticker: "tXTM", NetworkLabel: "Testnet"},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "cf-turnstile") {
+		t.Fatalf("expected no cf-turnstile footprint by default, got: %s", body)
+	}
+	if strings.Contains(body, "challenges.cloudflare.com") {
+		t.Fatalf("expected no challenges.cloudflare.com footprint by default, got: %s", body)
+	}
+}
+
+// TestHandler_Index_TurnstileEnabledWithSiteKey_RendersWidget covers that
+// with Config{TurnstileEnabled: true, TurnstileSiteKey: <test site key>},
+// the rendered / page contains both the Cloudflare script tag and the
+// widget div with the configured site key.
+func TestHandler_Index_TurnstileEnabledWithSiteKey_RendersWidget(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{
+			DispenseAmount:   1000000,
+			RateLimitWindow:  time.Hour,
+			Ticker:           "tXTM",
+			NetworkLabel:     "Testnet",
+			TurnstileEnabled: true,
+			TurnstileSiteKey: "1x00000000000000000000AA",
+		},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "challenges.cloudflare.com/turnstile/v0/api.js") {
+		t.Fatalf("expected the Cloudflare Turnstile script tag, got: %s", body)
+	}
+	if !strings.Contains(body, `data-sitekey="1x00000000000000000000AA"`) {
+		t.Fatalf("expected the Turnstile widget div with the configured site key, got: %s", body)
+	}
+}
+
+// TestHandler_Index_TurnstileEnabledWithoutSiteKey_NoWidget covers the
+// misconfiguration guard: TurnstileEnabled true but TurnstileSiteKey
+// empty must NOT render the widget, since the requirement is "enabled
+// AND site key non-empty".
+func TestHandler_Index_TurnstileEnabledWithoutSiteKey_NoWidget(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{
+			DispenseAmount:   1000000,
+			RateLimitWindow:  time.Hour,
+			Ticker:           "tXTM",
+			NetworkLabel:     "Testnet",
+			TurnstileEnabled: true,
+			TurnstileSiteKey: "",
+		},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "cf-turnstile") {
+		t.Fatalf("expected no cf-turnstile widget when TurnstileSiteKey is empty, got: %s", body)
+	}
+}
+
 func TestHandler_Request_RejectsMalformedAddressWith400(t *testing.T) {
 	h := newTestHandler(&fakeRepo{}, &fakeWallet{}, &fakeClock{now: time.Now()})
 	form := url.Values{"address": {"not-a-real-address"}}
@@ -598,6 +697,165 @@ func TestHandler_Index_NetworkNicknameOmittedWhenEmpty(t *testing.T) {
 	// Verify no stray parentheses or odd spacing
 	if strings.Contains(body, "mainnet ()") || strings.Contains(body, "mainnet  Tari") {
 		t.Fatalf("expected no stray parentheses or spacing artifacts in intro, got: %s", body)
+	}
+}
+
+// turnstileTestSecretKey is Cloudflare's documented always-pass TEST
+// secret key -- never a real secret. See
+// https://developers.cloudflare.com/turnstile/troubleshooting/testing/.
+const turnstileTestSecretKey = "1x0000000000000000000000000000000AA"
+
+// newTurnstileEnabledHandler builds a *Handler with
+// Config.TurnstileEnabled true (and the Cloudflare TEST secret key),
+// following the same direct Service/Handler literal construction
+// TestHandler_Request_AmountReflectedInSuccessMessage uses, since
+// newTestHandler's helper doesn't take a Config override.
+func newTurnstileEnabledHandler(repo *fakeRepo, wallet *fakeWallet, clock *fakeClock) *Handler {
+	svc := &Service{
+		Repo:   repo,
+		Wallet: wallet,
+		Clock:  clock,
+		Config: Config{
+			DispenseAmount:     1000000,
+			RateLimitWindow:    time.Hour,
+			Ticker:             "tXTM",
+			NetworkLabel:       "Testnet",
+			TurnstileEnabled:   true,
+			TurnstileSecretKey: turnstileTestSecretKey,
+		},
+	}
+	return NewHandler(svc, NewStatusCache())
+}
+
+// TestHandler_Request_TurnstileDisabledByDefault_ProceedsNormally covers
+// that with the zero-value Config (TurnstileEnabled: false, the
+// default), a normal valid, non-honeypot request reaches Dispense/the
+// wallet exactly as it did before Turnstile support existed -- the
+// same assertions TestHandler_Request_EmptyHoneypot_ProceedsNormally
+// already makes, since that test's Config is also the zero value for
+// TurnstileEnabled.
+func TestHandler_Request_TurnstileDisabledByDefault_ProceedsNormally(t *testing.T) {
+	valid := validTestnetAddress(t)
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	h := newTestHandler(repo, wallet, &fakeClock{now: time.Now()})
+	if h.Service.Config.TurnstileEnabled {
+		t.Fatal("expected TurnstileEnabled to default to false")
+	}
+
+	form := url.Values{"address": {valid}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if len(wallet.sentRecipients) != 1 {
+		t.Fatalf("expected exactly one wallet call, got %d", len(wallet.sentRecipients))
+	}
+	if repo.lookupCalls != 1 {
+		t.Fatalf("expected exactly one rate-limit lookup, got %d", repo.lookupCalls)
+	}
+}
+
+// TestHandler_Request_TurnstileEnabled_MissingToken_RejectedWithoutReachingWalletOrRateLimit
+// covers that when TurnstileEnabled is true and the request has no (or
+// an empty) cf-turnstile-response field, it's rejected with the generic
+// rejection message and never reaches Dispense -- same assertion style
+// as the honeypot test.
+func TestHandler_Request_TurnstileEnabled_MissingToken_RejectedWithoutReachingWalletOrRateLimit(t *testing.T) {
+	valid := validTestnetAddress(t)
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	h := newTurnstileEnabledHandler(repo, wallet, &fakeClock{now: time.Now()})
+
+	form := url.Values{"address": {valid}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), genericRejectionMessage("tXTM")) {
+		t.Fatalf("expected the generic rejection message, got: %s", rec.Body.String())
+	}
+	if len(wallet.sentRecipients) != 0 {
+		t.Fatal("wallet.SendTransactions must not be called when the turnstile token is missing")
+	}
+	if repo.lookupCalls != 0 {
+		t.Fatal("the rate-limit lookup must not be reached when the turnstile token is missing")
+	}
+}
+
+// TestHandler_Request_TurnstileEnabled_VerificationFails_RejectedWithoutReachingWalletOrRateLimit
+// covers that when TurnstileEnabled is true, a cf-turnstile-response
+// token is submitted, but the mocked HTTPClient reports
+// {"success": false}, the request is rejected the same way (never
+// reaching Dispense).
+func TestHandler_Request_TurnstileEnabled_VerificationFails_RejectedWithoutReachingWalletOrRateLimit(t *testing.T) {
+	valid := validTestnetAddress(t)
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	h := newTurnstileEnabledHandler(repo, wallet, &fakeClock{now: time.Now()})
+	h.HTTPClient = &fakeHTTPDoer{resp: jsonResponse(`{"success": false}`)}
+
+	form := url.Values{"address": {valid}, "cf-turnstile-response": {"some-token"}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), genericRejectionMessage("tXTM")) {
+		t.Fatalf("expected the generic rejection message, got: %s", rec.Body.String())
+	}
+	if len(wallet.sentRecipients) != 0 {
+		t.Fatal("wallet.SendTransactions must not be called when turnstile verification fails")
+	}
+	if repo.lookupCalls != 0 {
+		t.Fatal("the rate-limit lookup must not be reached when turnstile verification fails")
+	}
+}
+
+// TestHandler_Request_TurnstileEnabled_VerificationSucceeds_ProceedsNormally
+// covers that when TurnstileEnabled is true, a cf-turnstile-response
+// token is submitted, and the mocked HTTPClient reports
+// {"success": true}, the request proceeds to Dispense exactly as a
+// normal (non-turnstile) success would.
+func TestHandler_Request_TurnstileEnabled_VerificationSucceeds_ProceedsNormally(t *testing.T) {
+	valid := validTestnetAddress(t)
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	h := newTurnstileEnabledHandler(repo, wallet, &fakeClock{now: time.Now()})
+	h.HTTPClient = &fakeHTTPDoer{resp: jsonResponse(`{"success": true}`)}
+
+	form := url.Values{"address": {valid}, "cf-turnstile-response": {"some-token"}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Success") {
+		t.Fatalf("expected a success message, got body: %s", rec.Body.String())
+	}
+	if len(wallet.sentRecipients) != 1 {
+		t.Fatalf("expected exactly one wallet call, got %d", len(wallet.sentRecipients))
+	}
+	if repo.lookupCalls != 1 {
+		t.Fatalf("expected exactly one rate-limit lookup, got %d", repo.lookupCalls)
 	}
 }
 

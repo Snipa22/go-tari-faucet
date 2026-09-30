@@ -64,6 +64,21 @@ type Config struct {
 	// the intro paragraph, allowing the same binary to serve networks
 	// with and without a nickname.
 	NetworkNickname string
+
+	// TurnstileEnabled turns on server-side Cloudflare Turnstile CAPTCHA
+	// verification for /request. Off by default (zero value) so existing
+	// deployments are unaffected unless explicitly enabled via -turnstile-enabled.
+	TurnstileEnabled bool
+
+	// TurnstileSiteKey is the Cloudflare Turnstile site key rendered into the
+	// request form's widget when TurnstileEnabled is true. Only meaningful when
+	// TurnstileEnabled is true.
+	TurnstileSiteKey string
+
+	// TurnstileSecretKey is the Cloudflare Turnstile secret key used to verify
+	// submitted tokens against Cloudflare's siteverify endpoint. Only meaningful
+	// when TurnstileEnabled is true. Never logged.
+	TurnstileSecretKey string
 }
 
 // Service is the faucet's core business logic: address validation, rate
