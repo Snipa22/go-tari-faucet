@@ -1,13 +1,29 @@
 package faucet
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/Snipa22/go-tari-lib/v2/address"
 	"github.com/sirupsen/logrus"
 )
+
+// turnstileSiteverifyURL is Cloudflare's Turnstile siteverify endpoint.
+// verifyTurnstile always POSTs here -- never mocked/overridden in
+// production, only via the httpDoer seam in tests.
+const turnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+// httpDoer is the minimal subset of *http.Client used by verifyTurnstile,
+// small enough that tests can implement it with a fake instead of standing
+// up a real HTTP server or a full http.RoundTripper.
+type httpDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
 
 // genericRejectionMessage builds the message rendered for any request
 // rejection that shouldn't reveal its real cause to the caller --
@@ -32,6 +48,11 @@ type Handler struct {
 	// live wallet GRPC call. Must be non-nil -- NewHandler always
 	// supplies one.
 	StatusCache *StatusCache
+
+	// HTTPClient is used for outbound HTTP calls (currently just Cloudflare
+	// Turnstile siteverify). Defaults to http.DefaultClient when nil -- tests
+	// inject a mock via httpClient interface / http.Client{Transport: ...}.
+	HTTPClient httpDoer
 }
 
 // NewHandler builds a Handler around svc, reading wallet balance/
@@ -107,6 +128,49 @@ func (h *Handler) Request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.Service.Config.TurnstileEnabled {
+		token := r.FormValue("cf-turnstile-response")
+		logger := h.Service.Logger
+		if logger == nil {
+			logger = logrus.StandardLogger()
+		}
+		if token == "" {
+			logger.WithFields(logrus.Fields{
+				"ip": ip,
+			}).Warn("faucet: turnstile token missing, rejecting")
+			h.renderIndex(w, indexData{
+				Address: rawAddress,
+				Message: genericRejectionMessage(h.Service.Config.Ticker),
+				IsError: true,
+			})
+			return
+		}
+		ok, err := h.verifyTurnstile(r.Context(), h.Service.Config.TurnstileSecretKey, token, ip)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"ip":    ip,
+				"error": err,
+			}).Warn("faucet: turnstile verification request failed, rejecting")
+			h.renderIndex(w, indexData{
+				Address: rawAddress,
+				Message: genericRejectionMessage(h.Service.Config.Ticker),
+				IsError: true,
+			})
+			return
+		}
+		if !ok {
+			logger.WithFields(logrus.Fields{
+				"ip": ip,
+			}).Warn("faucet: turnstile verification failed, rejecting as spam")
+			h.renderIndex(w, indexData{
+				Address: rawAddress,
+				Message: genericRejectionMessage(h.Service.Config.Ticker),
+				IsError: true,
+			})
+			return
+		}
+	}
+
 	result := h.Service.Dispense(r.Context(), rawAddress, ip)
 	switch result.Outcome {
 	case OutcomeSuccess:
@@ -179,6 +243,8 @@ func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
 	data.Ticker = h.Service.Config.Ticker
 	data.NetworkLabel = h.Service.Config.NetworkLabel
 	data.NetworkNickname = h.Service.Config.NetworkNickname
+	data.TurnstileEnabled = h.Service.Config.TurnstileEnabled
+	data.TurnstileSiteKey = h.Service.Config.TurnstileSiteKey
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	switch {
 	case data.StatusCode != 0:
@@ -187,4 +253,45 @@ func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 	_ = indexTemplate.Execute(w, data)
+}
+
+// verifyTurnstile POSTs form-encoded {secret, response, remoteip} to
+// Cloudflare's Turnstile siteverify endpoint and returns whether it reports
+// success. Any HTTP/network/decode error is treated as a FAILED verification
+// (fail closed, not open) -- a Cloudflare outage must never accidentally let
+// spam through. The returned error (non-nil only on the fail-closed path) lets
+// the caller log the underlying transport/decode failure distinctly from a
+// plain "verification said no" rejection, so on-call can tell a Cloudflare
+// outage from a real bot rejection.
+func (h *Handler) verifyTurnstile(ctx context.Context, secretKey, token, remoteIP string) (bool, error) {
+	form := url.Values{
+		"secret":   {secretKey},
+		"response": {token},
+		"remoteip": {remoteIP},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, turnstileSiteverifyURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return false, fmt.Errorf("faucet: building turnstile siteverify request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := h.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("faucet: turnstile siteverify request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Success     bool     `json:"success"`
+		ErrorCodes  []string `json:"error-codes"`
+		ChallengeTS string   `json:"challenge_ts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false, fmt.Errorf("faucet: decoding turnstile siteverify response: %w", err)
+	}
+	return body.Success, nil
 }

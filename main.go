@@ -41,6 +41,9 @@ func main() {
 	networkLabelPtr := flag.String("network-label", "Testnet", "Display network label used alongside -ticker in the faucet's user-facing branding text (e.g. \"Testnet\" or \"Mainnet\"); defaults to \"Testnet\", matching the default -ticker")
 	networkNicknamePtr := flag.String("network-nickname", "Esme", "Optional display network nickname used in parentheses after -network-label in the intro paragraph (e.g. \"Esme\" for Esmeralda testnet); empty string means no nickname display")
 	statusPollIntervalPtr := flag.Duration("status-poll-interval", 30*time.Second, "How often to refresh the background-polled wallet balance/connectivity cache used by / and /healthz")
+	turnstileEnabledPtr := flag.Bool("turnstile-enabled", false, "Enable Cloudflare Turnstile CAPTCHA verification on /request (off by default)")
+	turnstileSiteKeyPtr := flag.String("turnstile-site-key", "", "Cloudflare Turnstile site key, rendered into the request form when -turnstile-enabled is true")
+	turnstileSecretKeyPtr := flag.String("turnstile-secret-key", getEnv("TURNSTILE_SECRET_KEY", ""), "Cloudflare Turnstile secret key used to verify tokens server-side (env TURNSTILE_SECRET_KEY); never put a real secret on the command line")
 	debugEnabledPtr := flag.Bool("debug-enabled", false, "Enable debug logging")
 	flag.Parse()
 
@@ -71,11 +74,14 @@ func main() {
 		Wallet: faucet.GRPCWalletClient{},
 		Clock:  faucet.RealClock{},
 		Config: faucet.Config{
-			DispenseAmount:  *dispenseAmountPtr,
-			RateLimitWindow: *rateLimitWindowPtr,
-			Ticker:          *tickerPtr,
-			NetworkLabel:    *networkLabelPtr,
-			NetworkNickname: *networkNicknamePtr,
+			DispenseAmount:     *dispenseAmountPtr,
+			RateLimitWindow:    *rateLimitWindowPtr,
+			Ticker:             *tickerPtr,
+			NetworkLabel:       *networkLabelPtr,
+			NetworkNickname:    *networkNicknamePtr,
+			TurnstileEnabled:   *turnstileEnabledPtr,
+			TurnstileSiteKey:   *turnstileSiteKeyPtr,
+			TurnstileSecretKey: *turnstileSecretKeyPtr,
 		},
 		Logger: logger,
 	}
@@ -106,6 +112,8 @@ func main() {
 		"ticker":               *tickerPtr,
 		"network_label":        *networkLabelPtr,
 		"network_nickname":     *networkNicknamePtr,
+		"turnstile_enabled":    *turnstileEnabledPtr,
+		"turnstile_site_key":   *turnstileSiteKeyPtr,
 	}).Info("tari-faucet: starting")
 
 	if err := http.ListenAndServe(*listenAddrPtr, mux); err != nil {

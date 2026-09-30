@@ -34,7 +34,8 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.NetworkLabel}} {{.Ticker}} Faucet</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
+{{if and .TurnstileEnabled .TurnstileSiteKey}}  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+{{end}}  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Inter:wght@300&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
   <style>
@@ -175,7 +176,8 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
     </div>
     <br>
     <button type="submit">Request {{.Ticker}}</button>
-  </form>
+{{if and .TurnstileEnabled .TurnstileSiteKey}}    <div class="cf-turnstile" data-sitekey="{{.TurnstileSiteKey}}"></div>
+{{end}}  </form>
 
   <p class="l2-note">Want to use Ootle (L2)? You'll need to burn your {{.Ticker}} first -- see the <a href="https://ootle.tari.com/guides/burn-minotari/" target="_blank" rel="noopener noreferrer">burn guide</a>.</p>
 </body>
@@ -223,6 +225,15 @@ type indexData struct {
 	// StatusCode is the HTTP status to send with the rendered page. Zero
 	// means "use the default" (200, or 400 if IsError).
 	StatusCode int
+
+	// TurnstileEnabled mirrors Config.TurnstileEnabled -- renderIndex fills this
+	// in on every call. When true AND TurnstileSiteKey is non-empty, indexTemplate
+	// renders the Cloudflare Turnstile widget in the request form.
+	TurnstileEnabled bool
+
+	// TurnstileSiteKey mirrors Config.TurnstileSiteKey -- renderIndex fills this
+	// in on every call. Only rendered when TurnstileEnabled is true.
+	TurnstileSiteKey string
 }
 
 // formatWithCommas renders n with thousands separators (e.g. 1234567 ->
