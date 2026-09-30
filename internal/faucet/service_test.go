@@ -227,6 +227,43 @@ type fakeClock struct {
 
 func (f *fakeClock) Now() time.Time { return f.now }
 
+// fakeRandomizer is an injectable AmountRandomizer test double. Two
+// modes, matched to what different tests in this file need:
+//
+//   - values, if non-empty, is consumed sequentially (one value per
+//     IntRange call, past the end of the slice it repeats the last
+//     value) -- used by the random-path-threads-through test to prove
+//     distinct injected values genuinely flow through to Result.Amount,
+//     the wallet call, and the recorded audit row on separate calls.
+//   - panicOnCall, if true, makes IntRange panic instead of returning a
+//     value -- used by the off-path test to prove chooseDispenseAmount
+//     never calls the randomizer at all when MaxDispenseAmount <=
+//     DispenseAmount, an early return rather than a zero-width-range
+//     call that coincidentally never panics.
+//
+// calls counts every IntRange invocation regardless of mode, so tests
+// can also assert an exact call count directly.
+type fakeRandomizer struct {
+	values      []int64
+	panicOnCall bool
+	calls       int
+}
+
+func (f *fakeRandomizer) IntRange(min, max int64) int64 {
+	f.calls++
+	if f.panicOnCall {
+		panic("fakeRandomizer.IntRange: must not be called on the fixed-amount path")
+	}
+	if len(f.values) == 0 {
+		return min
+	}
+	idx := f.calls - 1
+	if idx >= len(f.values) {
+		idx = len(f.values) - 1
+	}
+	return f.values[idx]
+}
+
 func successResponse(txID uint64) *tari_generated.TransferResponse {
 	return &tari_generated.TransferResponse{
 		Results: []*tari_generated.TransferResult{
@@ -510,6 +547,156 @@ func TestService_Dispense_ConcurrentSameAddressAndIP(t *testing.T) {
 	}
 	if len(wallet.sentRecipients) != 1 {
 		t.Errorf("wallet.SendTransactions called %d times, want exactly 1 (only the winning request should ever reach the wallet)", len(wallet.sentRecipients))
+	}
+}
+
+// TestService_Dispense_FixedAmountRegression_MaxDispenseAmountUnset covers
+// the exact code path production testnet traffic hits today: Config.Rand
+// is left nil (as every existing Config{DispenseAmount: ...} literal in
+// this file does) and Config.MaxDispenseAmount is left at its zero
+// value, exactly mirroring today's -dispense-amount-only flag set. Every
+// one of several calls, across distinct addresses, must dispense exactly
+// DispenseAmount -- same Result.Amount, same wallet-sent
+// PaymentRecipient.Amount, same ReserveDispense-recorded audit amount,
+// every time -- proving chooseDispenseAmount's "off" path is genuinely
+// unchanged/no-randomness-touched.
+func TestService_Dispense_FixedAmountRegression_MaxDispenseAmountUnset(t *testing.T) {
+	const fixedAmount = 1_000_000
+	repo := &fakeRepo{}
+	wallet := &fakeWallet{sendResp: successResponse(1)}
+	svc := &Service{
+		Repo:   repo,
+		Wallet: wallet,
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{DispenseAmount: fixedAmount, RateLimitWindow: time.Hour},
+	}
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		addr := validTestnetAddress(t)
+		result := svc.Dispense(context.Background(), addr, fmt.Sprintf("10.0.0.%d", i+1))
+		if result.Outcome != OutcomeSuccess {
+			t.Fatalf("iteration %d: Outcome = %v, want OutcomeSuccess (err=%v)", i, result.Outcome, result.Err)
+		}
+		if result.Amount != fixedAmount {
+			t.Fatalf("iteration %d: Result.Amount = %d, want %d", i, result.Amount, fixedAmount)
+		}
+	}
+
+	if len(wallet.sentRecipients) != n {
+		t.Fatalf("wallet.SendTransactions called %d times, want %d", len(wallet.sentRecipients), n)
+	}
+	for i, recipients := range wallet.sentRecipients {
+		if len(recipients) != 1 || recipients[0].Amount != fixedAmount {
+			t.Fatalf("call %d: sent recipients = %+v, want a single recipient with Amount=%d", i, recipients, fixedAmount)
+		}
+	}
+	if len(repo.recorded) != n {
+		t.Fatalf("expected %d recorded dispenses, got %d", n, len(repo.recorded))
+	}
+	for i, rec := range repo.recorded {
+		if rec.Amount != fixedAmount {
+			t.Fatalf("recorded[%d].Amount = %d, want %d", i, rec.Amount, fixedAmount)
+		}
+	}
+}
+
+// TestService_Dispense_RandomAmountThreadsThroughEndToEnd covers that,
+// with MaxDispenseAmount > DispenseAmount and an injected fake
+// AmountRandomizer, the token count the fake returns genuinely flows
+// through to Result.Amount, the wallet-sent PaymentRecipient.Amount, and
+// the ReserveDispense-recorded audit amount -- run for two different
+// fake-returned values (on two separate Service instances) to prove
+// it's actually threaded per-call, not coincidentally matching
+// DispenseAmount as some fallback.
+func TestService_Dispense_RandomAmountThreadsThroughEndToEnd(t *testing.T) {
+	const dispenseAmount = 1_000_000     // 1 token
+	const maxDispenseAmount = 10_000_000 // 10 tokens
+
+	cases := []struct {
+		name       string
+		tokens     int64  // what the fake randomizer returns from IntRange
+		wantAmount uint64 // tokens * 1_000_000
+	}{
+		{name: "low end of range", tokens: 1, wantAmount: 1_000_000},
+		{name: "distinct higher value", tokens: 7, wantAmount: 7_000_000},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			validAddr := validTestnetAddress(t)
+			repo := &fakeRepo{}
+			wallet := &fakeWallet{sendResp: successResponse(1)}
+			fakeRand := &fakeRandomizer{values: []int64{tc.tokens}}
+			svc := &Service{
+				Repo:   repo,
+				Wallet: wallet,
+				Clock:  &fakeClock{now: time.Now()},
+				Rand:   fakeRand,
+				Config: Config{DispenseAmount: dispenseAmount, MaxDispenseAmount: maxDispenseAmount, RateLimitWindow: time.Hour},
+			}
+
+			result := svc.Dispense(context.Background(), validAddr, "10.0.0.1")
+			if result.Outcome != OutcomeSuccess {
+				t.Fatalf("Outcome = %v, want OutcomeSuccess (err=%v)", result.Outcome, result.Err)
+			}
+			if result.Amount != tc.wantAmount {
+				t.Fatalf("Result.Amount = %d, want %d", result.Amount, tc.wantAmount)
+			}
+			if fakeRand.calls != 1 {
+				t.Fatalf("fakeRandomizer.IntRange called %d times, want exactly 1", fakeRand.calls)
+			}
+			if len(wallet.sentRecipients) != 1 || len(wallet.sentRecipients[0]) != 1 || wallet.sentRecipients[0][0].Amount != tc.wantAmount {
+				t.Fatalf("wallet-sent amount = %+v, want a single recipient with Amount=%d", wallet.sentRecipients, tc.wantAmount)
+			}
+			if len(repo.recorded) != 1 || repo.recorded[0].Amount != tc.wantAmount {
+				t.Fatalf("repo.recorded = %+v, want a single record with Amount=%d", repo.recorded, tc.wantAmount)
+			}
+		})
+	}
+}
+
+// TestService_Dispense_OffPathNeverTouchesRandomizer covers the boundary
+// (MaxDispenseAmount == DispenseAmount, not just the zero-value "unset"
+// case) and proves chooseDispenseAmount's fixed-amount path is a genuine
+// early return: the injected fakeRandomizer panics if IntRange is ever
+// called, and a successful OutcomeSuccess dispense with call count 0
+// proves it never was.
+func TestService_Dispense_OffPathNeverTouchesRandomizer(t *testing.T) {
+	const amount = 1_000_000
+
+	tests := []struct {
+		name              string
+		maxDispenseAmount uint64
+	}{
+		{name: "MaxDispenseAmount unset (0)", maxDispenseAmount: 0},
+		{name: "MaxDispenseAmount == DispenseAmount boundary", maxDispenseAmount: amount},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			validAddr := validTestnetAddress(t)
+			repo := &fakeRepo{}
+			wallet := &fakeWallet{sendResp: successResponse(1)}
+			fakeRand := &fakeRandomizer{panicOnCall: true}
+			svc := &Service{
+				Repo:   repo,
+				Wallet: wallet,
+				Clock:  &fakeClock{now: time.Now()},
+				Rand:   fakeRand,
+				Config: Config{DispenseAmount: amount, MaxDispenseAmount: tt.maxDispenseAmount, RateLimitWindow: time.Hour},
+			}
+
+			result := svc.Dispense(context.Background(), validAddr, "10.0.0.1")
+			if result.Outcome != OutcomeSuccess {
+				t.Fatalf("Outcome = %v, want OutcomeSuccess (err=%v)", result.Outcome, result.Err)
+			}
+			if result.Amount != amount {
+				t.Fatalf("Result.Amount = %d, want %d", result.Amount, amount)
+			}
+			if fakeRand.calls != 0 {
+				t.Fatalf("fakeRandomizer.IntRange called %d times, want exactly 0", fakeRand.calls)
+			}
+		})
 	}
 }
 

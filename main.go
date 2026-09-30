@@ -36,6 +36,7 @@ func main() {
 	psqlServerPtr := flag.String("psql-server", getEnv("PSQL_SERVER", ""), "Postgres DSN (env PSQL_SERVER), required")
 	sentryServerPtr := flag.String("sentry-server", getEnv("SENTRY_SERVER", ""), "Sentry DSN (env SENTRY_SERVER), optional")
 	dispenseAmountPtr := flag.Uint64("dispense-amount", 10000000000, "Amount to dispense per request, in microMinotari")
+	dispenseMaxAmountPtr := flag.Uint64("dispense-max-amount", 0, "Upper bound, in microMinotari, of a random dispense range; when 0 or <= -dispense-amount, the feature is off and every dispense sends exactly -dispense-amount (unchanged fixed-amount behavior)")
 	rateLimitWindowPtr := flag.Duration("rate-limit-window", 24*time.Hour, "Minimum time between successful dispenses for the same address or IP")
 	tickerPtr := flag.String("ticker", "tXTM", "Display ticker word used in the faucet's user-facing branding text (e.g. \"tXTM\" on testnet, \"XTM\" on mainnet); defaults to the testnet ticker, matching the default -wallet-grpc-address")
 	networkLabelPtr := flag.String("network-label", "Testnet", "Display network label used alongside -ticker in the faucet's user-facing branding text (e.g. \"Testnet\" or \"Mainnet\"); defaults to \"Testnet\", matching the default -ticker")
@@ -75,6 +76,7 @@ func main() {
 		Clock:  faucet.RealClock{},
 		Config: faucet.Config{
 			DispenseAmount:     *dispenseAmountPtr,
+			MaxDispenseAmount:  *dispenseMaxAmountPtr,
 			RateLimitWindow:    *rateLimitWindowPtr,
 			Ticker:             *tickerPtr,
 			NetworkLabel:       *networkLabelPtr,
@@ -107,6 +109,7 @@ func main() {
 		"listen_addr":          *listenAddrPtr,
 		"wallet_grpc_address":  *walletGRPCAddressPtr,
 		"dispense_amount":      *dispenseAmountPtr,
+		"dispense_max_amount":  *dispenseMaxAmountPtr,
 		"rate_limit_window":    rateLimitWindowPtr.String(),
 		"status_poll_interval": statusPollIntervalPtr.String(),
 		"ticker":               *tickerPtr,

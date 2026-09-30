@@ -410,6 +410,42 @@ func TestHandler_Request_AmountReflectedInSuccessMessage(t *testing.T) {
 	}
 }
 
+// TestHandler_Request_RandomAmountReflectedInSuccessMessage covers that,
+// for the random-range path (MaxDispenseAmount > DispenseAmount), the
+// rendered success message reflects the actual PER-REQUEST amount
+// (result.Amount, sourced from the injected fake randomizer) rather than
+// the static Config.DispenseAmount -- the two are configured to be
+// clearly different values here specifically so a test bug that
+// accidentally re-reads the static config wouldn't go unnoticed.
+func TestHandler_Request_RandomAmountReflectedInSuccessMessage(t *testing.T) {
+	valid := validTestnetAddress(t)
+	wallet := &fakeWallet{sendResp: successResponse(99)}
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: wallet,
+		Clock:  &fakeClock{now: time.Now()},
+		Rand:   &fakeRandomizer{values: []int64{5}}, // 5 tokens -> 5,000,000 microMinotari
+		Config: Config{DispenseAmount: 2_000_000, MaxDispenseAmount: 10_000_000, RateLimitWindow: time.Hour},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	form := url.Values{"address": {valid}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.Request(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+	}
+	if !strings.Contains(body, "5 XTM") {
+		t.Fatalf("expected the randomized per-request amount (5 XTM) in the response body, got: %s", body)
+	}
+	if strings.Contains(body, "Sent 2 XTM") {
+		t.Fatalf("response body must not reflect the static Config.DispenseAmount (2 XTM) in the success message, got: %s", body)
+	}
+}
+
 func TestHandler_Request_HoneypotPopulated_RejectedWithoutReachingWalletOrRateLimit(t *testing.T) {
 	valid := validTestnetAddress(t)
 	repo := &fakeRepo{}
@@ -863,5 +899,108 @@ func TestDescribeAddressError_PaymentIDRejection(t *testing.T) {
 	got := describeAddressError(ErrPaymentIDNotAllowed)
 	if !strings.Contains(got, "payment id") {
 		t.Fatalf("describeAddressError(ErrPaymentIDNotAllowed) = %q, want it to mention \"payment id\"", got)
+	}
+}
+
+// TestHandler_Index_IntroParagraph_MaxDispenseAmountOff covers the
+// byte-identical regression case: when MaxDispenseAmount is 0 (unset) or
+// <= DispenseAmount (including the exact boundary, not just 0), the
+// rendered intro paragraph is unchanged from today's wording -- no
+// random-range sentence is added. Reuses the exact intro strings already
+// asserted by TestHandler_Index_NetworkNicknameRendersInIntroWithDefaultConfig
+// and TestHandler_Index_NetworkNicknameOmittedWhenEmpty rather than
+// inventing new expected text for this case.
+func TestHandler_Index_IntroParagraph_MaxDispenseAmountOff(t *testing.T) {
+	tests := []struct {
+		name              string
+		maxDispenseAmount uint64
+		networkNickname   string
+		networkLabel      string
+		ticker            string
+		wantExactIntro    string
+	}{
+		{
+			name:              "unset (0), with nickname",
+			maxDispenseAmount: 0,
+			networkNickname:   "Esme",
+			networkLabel:      "Testnet",
+			ticker:            "tXTM",
+			wantExactIntro:    "Enter a testnet (Esme) Tari address below to receive a small amount of tXTM.",
+		},
+		{
+			name:              "== DispenseAmount boundary, no nickname",
+			maxDispenseAmount: 1000000, // equals the Config.DispenseAmount set below
+			networkNickname:   "",
+			networkLabel:      "Mainnet",
+			ticker:            "XTM",
+			wantExactIntro:    "Enter a mainnet Tari address below to receive a small amount of XTM.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &Service{
+				Repo:   &fakeRepo{},
+				Wallet: &fakeWallet{},
+				Clock:  &fakeClock{now: time.Now()},
+				Config: Config{
+					DispenseAmount:    1000000,
+					MaxDispenseAmount: tt.maxDispenseAmount,
+					RateLimitWindow:   time.Hour,
+					Ticker:            tt.ticker,
+					NetworkLabel:      tt.networkLabel,
+					NetworkNickname:   tt.networkNickname,
+				},
+			}
+			h := NewHandler(svc, NewStatusCache())
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			rec := httptest.NewRecorder()
+
+			h.Index(rec, req)
+
+			body := rec.Body.String()
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+			}
+			if !strings.Contains(body, tt.wantExactIntro) {
+				t.Fatalf("expected the exact byte-identical intro paragraph %q, got: %s", tt.wantExactIntro, body)
+			}
+			if strings.Contains(body, "random amount") {
+				t.Fatalf("expected no random-range wording when the feature is off, got: %s", body)
+			}
+		})
+	}
+}
+
+// TestHandler_Index_IntroParagraph_MaxDispenseAmountOn covers that when
+// MaxDispenseAmount > DispenseAmount, the intro paragraph communicates
+// the random range using formatXTM for both bounds, rather than implying
+// (or omitting, as today's fixed-amount copy does) a single fixed
+// amount.
+func TestHandler_Index_IntroParagraph_MaxDispenseAmountOn(t *testing.T) {
+	svc := &Service{
+		Repo:   &fakeRepo{},
+		Wallet: &fakeWallet{},
+		Clock:  &fakeClock{now: time.Now()},
+		Config: Config{
+			DispenseAmount:    1_000_000,
+			MaxDispenseAmount: 10_000_000,
+			RateLimitWindow:   time.Hour,
+			Ticker:            "XTM",
+			NetworkLabel:      "Mainnet",
+		},
+	}
+	h := NewHandler(svc, NewStatusCache())
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	h.Index(rec, req)
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, body)
+	}
+	const wantRangeText = "random amount between 1 XTM and 10 XTM"
+	if !strings.Contains(body, wantRangeText) {
+		t.Fatalf("expected the intro paragraph to mention %q, got: %s", wantRangeText, body)
 	}
 }

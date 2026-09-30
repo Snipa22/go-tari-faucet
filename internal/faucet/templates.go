@@ -157,7 +157,7 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 </head>
 <body>
   <h1>{{.NetworkLabel}} {{.Ticker}} Faucet</h1>
-  <p>Enter a {{.NetworkLabel | lower}}{{if .NetworkNickname}} ({{.NetworkNickname}}){{end}} Tari address below to receive a small amount of {{.Ticker}}.</p>
+  <p>Enter a {{.NetworkLabel | lower}}{{if .NetworkNickname}} ({{.NetworkNickname}}){{end}} Tari address below to receive a small amount of {{.Ticker}}.{{if gt .MaxDispenseAmount .DispenseAmount}} You'll receive a random amount between {{xtm .DispenseAmount}} and {{xtm .MaxDispenseAmount}} {{.Ticker}}.{{end}}</p>
 
   <div class="balance">
     <span class="label">Faucet balance</span>
@@ -212,6 +212,17 @@ type indexData struct {
 	// in on every call so callers building indexData literals don't each
 	// need to remember to set it.
 	NetworkNickname string
+
+	// DispenseAmount and MaxDispenseAmount mirror Service.Config's
+	// fields of the same name, sourced by renderIndex on every call.
+	// DispenseAmount alone is the fixed amount (today's behavior, not
+	// displayed anywhere in the intro paragraph). When
+	// MaxDispenseAmount > DispenseAmount, the intro paragraph adds a
+	// sentence naming the random-range bounds via the xtm template
+	// func; when it's 0 or <= DispenseAmount, the template renders
+	// byte-identically to before this field existed.
+	DispenseAmount    uint64
+	MaxDispenseAmount uint64
 
 	// FaucetBalance is the wallet's current spendable (available)
 	// balance in microMinotari. Only meaningful when FaucetBalanceErr is

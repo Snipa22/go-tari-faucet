@@ -2,7 +2,9 @@ package faucet
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"time"
 
 	"github.com/Snipa22/go-tari-grpc-lib/v3/tari_generated"
@@ -33,6 +35,13 @@ type Result struct {
 	RetryAfter time.Time // valid only when Outcome == OutcomeRateLimited
 	Err        error     // non-nil for OutcomeInvalidAddress/OutcomeError
 	TxID       uint64    // valid only when Outcome == OutcomeSuccess
+	// Amount is the actual chosen dispense amount (in microMinotari) for
+	// this call, from Service.chooseDispenseAmount -- always the fixed
+	// Config.DispenseAmount when the random range is off, otherwise the
+	// per-call random amount that was actually sent to the wallet. Set
+	// on OutcomeSuccess; also set on OutcomeError to reflect the amount
+	// that was attempted, for logging/debugging purposes.
+	Amount uint64
 }
 
 // Config holds Service's tunables, all of which are wired from main.go's
@@ -40,6 +49,17 @@ type Result struct {
 type Config struct {
 	DispenseAmount  uint64
 	RateLimitWindow time.Duration
+
+	// MaxDispenseAmount, when set greater than DispenseAmount, opts the
+	// deployment into dispensing a random amount in the inclusive
+	// range [DispenseAmount, MaxDispenseAmount] (quantized to whole
+	// tokens -- see chooseDispenseAmount) instead of always the exact
+	// DispenseAmount. Zero (the default) or any value <=
+	// DispenseAmount means the feature is off -- DispenseAmount's
+	// fixed-amount behavior is unchanged, byte-for-byte, and the
+	// randomizer is never invoked. This is what today's testnet
+	// deployment exercises, since it only ever sets -dispense-amount.
+	MaxDispenseAmount uint64
 
 	// Ticker is the exact display word used for user-facing branding
 	// text (e.g. "tXTM" on testnet, "XTM" on mainnet). It's taken
@@ -81,6 +101,44 @@ type Config struct {
 	TurnstileSecretKey string
 }
 
+// AmountRandomizer is the narrow randomness source chooseDispenseAmount
+// depends on, so tests can inject deterministic values instead of racing
+// real randomness.
+type AmountRandomizer interface {
+	// IntRange returns a value uniformly distributed over the inclusive
+	// range [min, max]. Implementations must handle min == max (only one
+	// possible value) without panicking.
+	IntRange(min, max int64) int64
+}
+
+// cryptoRandAmountRandomizer is the production AmountRandomizer, backed
+// by crypto/rand rather than math/rand -- dispense amounts are a
+// user-facing, financial value, so there's no reason to accept even the
+// small predictability risk of a PRNG seeded from wall-clock time.
+type cryptoRandAmountRandomizer struct{}
+
+// IntRange implements AmountRandomizer via crypto/rand.Int. min == max
+// returns min directly without consulting crypto/rand at all, since
+// big.NewInt(0) as an upper bound would be a degenerate (and, per
+// crypto/rand.Int's docs, invalid/panicking) call.
+func (cryptoRandAmountRandomizer) IntRange(min, max int64) int64 {
+	if min == max {
+		return min
+	}
+	span := big.NewInt(max - min + 1)
+	n, err := rand.Int(rand.Reader, span)
+	if err != nil {
+		// crypto/rand.Reader failing is a fatal platform-level problem
+		// (entropy source unavailable) that every other crypto/rand
+		// caller in this ecosystem would also be unable to recover
+		// from meaningfully; falling back to the lower bound keeps
+		// Dispense from ever sending more than the requested range
+		// permits rather than panicking a live request.
+		return min
+	}
+	return min + n.Int64()
+}
+
 // Service is the faucet's core business logic: address validation, rate
 // limiting, and wallet dispensing. It depends only on the narrow
 // Repository/WalletClient/Clock interfaces, so it can be fully unit tested
@@ -89,6 +147,11 @@ type Service struct {
 	Repo   Repository
 	Wallet WalletClient
 	Clock  Clock
+	// Rand is the randomness source chooseDispenseAmount uses when the
+	// random-range feature is on (see Config.MaxDispenseAmount). Nil
+	// falls back to cryptoRandAmountRandomizer, mirroring how a nil
+	// Clock falls back to time.Now() in now().
+	Rand   AmountRandomizer
 	Config Config
 	Logger *logrus.Logger
 }
@@ -114,20 +177,25 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 
 	now := s.now()
 	since := now.Add(-s.Config.RateLimitWindow)
+	// chooseDispenseAmount is called exactly once per Dispense call, up
+	// front, so every downstream use -- the rate-limit reservation, the
+	// wallet send, the audit finalize, and the returned Result -- all
+	// agree on the exact same amount for this request.
+	amount := s.chooseDispenseAmount()
 	// ReserveDispense does the rate-limit check AND reserves a
 	// placeholder audit row atomically (see its doc comment) -- this is
 	// the fix for the race that let concurrent requests for the same
 	// address/ip all pass a plain "check" SELECT before any of their
 	// "record" INSERTs landed. Nothing below this point may re-derive
 	// the rate-limit decision from a separate, unsynchronized read.
-	reservation, err := s.Repo.ReserveDispense(ctx, base58Addr, ip, s.Config.DispenseAmount, since, now)
+	reservation, err := s.Repo.ReserveDispense(ctx, base58Addr, ip, amount, since, now)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"address": base58Addr,
 			"ip":      ip,
 			"error":   err,
 		}).Warn("faucet: rate-limit reservation failed")
-		return Result{Outcome: OutcomeError, Err: err}
+		return Result{Outcome: OutcomeError, Err: err, Amount: amount}
 	}
 	if reservation.RateLimited {
 		retryAfter := reservation.LastSuccessAt.Add(s.Config.RateLimitWindow)
@@ -145,13 +213,14 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 	resp, sendErr := s.Wallet.SendTransactions([]*tari_generated.PaymentRecipient{
 		{
 			Address:     base58Addr,
-			Amount:      s.Config.DispenseAmount,
+			Amount:      amount,
 			FeePerGram:  5,
 			PaymentType: tari_generated.PaymentRecipient_ONE_SIDED,
 		},
 	}, false)
 
 	success, errMsg, txID, result := s.buildResult(resp, sendErr)
+	result.Amount = amount
 
 	// Deliberately outside of ReserveDispense's advisory-lock
 	// transaction -- see FinalizeDispense's doc comment for why this
@@ -168,7 +237,7 @@ func (s *Service) Dispense(ctx context.Context, rawAddress, ip string) Result {
 	logFields := logrus.Fields{
 		"address": base58Addr,
 		"ip":      ip,
-		"amount":  s.Config.DispenseAmount,
+		"amount":  amount,
 		"success": success,
 	}
 	if errMsg != "" {
@@ -207,6 +276,39 @@ func (s *Service) now() time.Time {
 		return time.Now()
 	}
 	return s.Clock.Now()
+}
+
+// chooseDispenseAmount decides the amount (in microMinotari) to dispense
+// for a single Dispense call.
+//
+// When Config.MaxDispenseAmount is 0 or <= Config.DispenseAmount, the
+// random-range feature is off: this returns Config.DispenseAmount
+// directly, an early return that never touches s.Rand at all -- not
+// even a zero-width-range call -- so this path (the only one today's
+// testnet deployment exercises, since it only ever sets
+// -dispense-amount) is provably untouched by any randomness.
+//
+// Otherwise, it picks a new random amount, independently per call,
+// uniformly distributed over the inclusive range [DispenseAmount,
+// MaxDispenseAmount], quantized to whole-token steps: we intentionally
+// never dispense a fractional token amount -- it would look like a bug,
+// not a feature. This is done by picking a random integer count of
+// whole tokens in [DispenseAmount/1_000_000, MaxDispenseAmount/1_000_000]
+// (inclusive) via s.Rand, then multiplying that count back up by
+// 1_000_000.
+func (s *Service) chooseDispenseAmount() uint64 {
+	if s.Config.MaxDispenseAmount == 0 || s.Config.MaxDispenseAmount <= s.Config.DispenseAmount {
+		return s.Config.DispenseAmount
+	}
+	minTokens := int64(s.Config.DispenseAmount / microMinotariPerXTM)
+	maxTokens := int64(s.Config.MaxDispenseAmount / microMinotariPerXTM)
+	var tokens int64
+	if s.Rand == nil {
+		tokens = cryptoRandAmountRandomizer{}.IntRange(minTokens, maxTokens)
+	} else {
+		tokens = s.Rand.IntRange(minTokens, maxTokens)
+	}
+	return uint64(tokens) * microMinotariPerXTM
 }
 
 // CurrentBalance returns the wallet's currently spendable (available)
