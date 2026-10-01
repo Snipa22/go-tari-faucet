@@ -157,7 +157,7 @@ var indexTemplate = template.Must(template.New("index").Funcs(template.FuncMap{
 </head>
 <body>
   <h1>{{.NetworkLabel}} {{.Ticker}} Faucet</h1>
-  <p>Enter a {{.NetworkLabel | lower}}{{if .NetworkNickname}} ({{.NetworkNickname}}){{end}} Tari address below to receive a small amount of {{.Ticker}}.{{if gt .MaxDispenseAmount .DispenseAmount}} You'll receive a random amount between {{xtm .DispenseAmount}} and {{xtm .MaxDispenseAmount}} {{.Ticker}}.{{end}}</p>
+  <p>Enter a {{.NetworkLabel | lower}}{{if .NetworkNickname}} ({{.NetworkNickname}}){{end}} Tari address below to receive a small amount of {{.Ticker}}.{{if gt .MaxDispenseAmount .DispenseAmount}} You'll receive a random amount between {{xtm .DispenseAmount}} and {{xtm .MaxDispenseAmount}}.{{end}}</p>
 
   <div class="balance">
     <span class="label">Faucet balance</span>
