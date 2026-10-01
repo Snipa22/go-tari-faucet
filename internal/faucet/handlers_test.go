@@ -1003,4 +1003,17 @@ func TestHandler_Index_IntroParagraph_MaxDispenseAmountOn(t *testing.T) {
 	if !strings.Contains(body, wantRangeText) {
 		t.Fatalf("expected the intro paragraph to mention %q, got: %s", wantRangeText, body)
 	}
+	// Regression guard: each xtm-templated bound already appends its own
+	// " XTM" suffix (see formatXTM), so the sentence must not also carry
+	// a redundant trailing ticker literal -- that bug previously rendered
+	// "...10 XTM XTM." A plain substring check on wantRangeText above
+	// passes either way (it's a prefix of the buggy text too), so assert
+	// the doubled-ticker text is absent too.
+	if strings.Contains(body, "XTM XTM") {
+		t.Fatalf("expected no doubled ticker text (\"XTM XTM\") in the intro paragraph, got: %s", body)
+	}
+	const wantExactSentence = "random amount between 1 XTM and 10 XTM."
+	if !strings.Contains(body, wantExactSentence) {
+		t.Fatalf("expected the intro paragraph to end the range sentence with %q (single trailing period, no extra ticker), got: %s", wantExactSentence, body)
+	}
 }
