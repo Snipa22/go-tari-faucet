@@ -278,6 +278,77 @@ func TestHandler_Request_RateLimitedReturns429(t *testing.T) {
 	}
 }
 
+// TestHandler_Request_SuccessShowsRealStatusCacheBalance guards against the
+// regression where Request's indexData{} literals never set
+// FaucetBalance/FaucetBalanceErr, so every /request response rendered the
+// zero value ("0 XTM (spendable)") regardless of the real cached wallet
+// balance. renderIndex must populate it from StatusCache on every call
+// site, including this one.
+func TestHandler_Request_SuccessShowsRealStatusCacheBalance(t *testing.T) {
+	valid := validTestnetAddress(t)
+	wallet := &fakeWallet{
+		sendResp:    successResponse(7),
+		balanceResp: &tari_generated.GetBalanceResponse{AvailableBalance: 1234567},
+	}
+	cache := NewStatusCache()
+	cache.poll(wallet) // seed the cache directly, as StartPolling would in the background
+	h := newTestHandlerWithCache(&fakeRepo{}, wallet, &fakeClock{now: time.Now()}, cache)
+	form := url.Values{"address": {valid}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "1.234567 XTM") {
+		t.Fatalf("expected the real cached balance (1.234567 XTM) in the response body, got: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "0 XTM (spendable)") {
+		t.Fatalf("response body still shows the zero-value balance instead of the real cached one: %s", rec.Body.String())
+	}
+}
+
+// TestHandler_Request_RateLimitedShowsRealStatusCacheBalance is the same
+// regression guard as the success case above, but for an error outcome
+// (rate-limited) -- the bug affected every indexData{} literal built inside
+// Request, not just the success path.
+func TestHandler_Request_RateLimitedShowsRealStatusCacheBalance(t *testing.T) {
+	valid := validTestnetAddress(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &fakeRepo{lastByKey: map[string]time.Time{
+		"addr:" + valid: base,
+	}}
+	wallet := &fakeWallet{
+		sendResp:    successResponse(1),
+		balanceResp: &tari_generated.GetBalanceResponse{AvailableBalance: 9876543},
+	}
+	cache := NewStatusCache()
+	cache.poll(wallet) // seed the cache directly, as StartPolling would in the background
+	clock := &fakeClock{now: base.Add(time.Minute)}
+	h := newTestHandlerWithCache(repo, wallet, clock, cache)
+
+	form := url.Values{"address": {valid}}
+	req := httptest.NewRequest(http.MethodPost, "/request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = "192.0.2.55:1234"
+	rec := httptest.NewRecorder()
+
+	h.Request(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429, body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "9.876543 XTM") {
+		t.Fatalf("expected the real cached balance (9.876543 XTM) in the response body, got: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "0 XTM (spendable)") {
+		t.Fatalf("response body still shows the zero-value balance instead of the real cached one: %s", rec.Body.String())
+	}
+}
+
 func TestHandler_Request_UsesXForwardedForForRateLimitKey(t *testing.T) {
 	addrOne := validTestnetAddress(t)
 	addrTwo := validTestnetAddress(t)
