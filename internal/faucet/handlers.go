@@ -85,14 +85,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	data := indexData{}
-	balance, balanceOK, _, _ := h.StatusCache.Get()
-	if !balanceOK {
-		data.FaucetBalanceErr = true
-	} else {
-		data.FaucetBalance = balance
-	}
-	h.renderIndex(w, data)
+	h.renderIndex(w, indexData{})
 }
 
 // Request handles the form submission: rejects honeypot-tripped spam,
@@ -238,7 +231,13 @@ func describeAddressError(err error) string {
 // renderIndex renders data through indexTemplate, filling in Ticker,
 // NetworkLabel, and NetworkNickname from h.Service.Config so every call site
 // gets the configured branding words without having to set them on each
-// indexData literal itself.
+// indexData literal itself. It also populates FaucetBalance/FaucetBalanceErr
+// from h.StatusCache here -- centrally, for every call site, present and
+// future -- rather than relying on each caller (Index, Request's many
+// outcome branches, etc.) to remember to set it individually. That used to
+// be Index's job alone, which meant every indexData{} literal built inside
+// Request silently rendered a zero/zero-value balance ("0 XTM (spendable)")
+// on every outcome, regardless of the real cached balance.
 func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
 	data.Ticker = h.Service.Config.Ticker
 	data.NetworkLabel = h.Service.Config.NetworkLabel
@@ -247,6 +246,12 @@ func (h *Handler) renderIndex(w http.ResponseWriter, data indexData) {
 	data.TurnstileSiteKey = h.Service.Config.TurnstileSiteKey
 	data.DispenseAmount = h.Service.Config.DispenseAmount
 	data.MaxDispenseAmount = h.Service.Config.MaxDispenseAmount
+	balance, balanceOK, _, _ := h.StatusCache.Get()
+	if !balanceOK {
+		data.FaucetBalanceErr = true
+	} else {
+		data.FaucetBalance = balance
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	switch {
 	case data.StatusCode != 0:
